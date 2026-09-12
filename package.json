@@ -11,7 +11,7 @@
     "expo-camera": "~57.0.5",
     "expo-file-system": "~57.0.7",
     "expo-haptics": "~57.0.3",
-    "expo-image-picker": "~17.0.9",
+    "expo-image-picker": "~57.0.17",
     "expo-media-library": "~57.0.5",
     "expo-screen-orientation": "~57.0.2",
     "expo-status-bar": "~57.0.1",
@@ -45,7 +45,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint . --ext .ts,.tsx",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "check:deps": "node scripts/check-sdk-versions.mjs",
+    "verify": "npm run check:deps && npm run typecheck && npm run lint && npm test"
   },
   "private": true,
   "jest": {

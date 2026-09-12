@@ -78,10 +78,25 @@ or `app.json` change. iOS needs macOS + Xcode, Android needs the Android SDK,
 or use EAS Build for either.
 
 ```bash
+npm run verify        # all of the below
+npm run check:deps    # native deps vs. the Expo SDK's pinned versions
 npm run typecheck     # tsc --noEmit
-npm test              # 94 unit tests
+npm test              # 98 unit tests
 npm run lint
 ```
+
+`check:deps` exists because a mismatched native package is invisible to every
+other check: it installs, typechecks and bundles fine, then takes the app down
+on launch with a `NoClassDefFoundError` inside the Expo module registry. It
+verifies both the installed version and the range declared in `package.json`
+against `expo/bundledNativeModules.json` — the latter because a wrong range
+passes locally while breaking the next clean install. `npx expo install`
+normally prevents this by resolving versions from Expo's API; this check is what
+replaces it when versions are pinned by hand.
+
+> **After changing any native dependency, rebuild the development build.**
+> Metro only reloads JavaScript — `npm start` will keep running against the old
+> native binary.
 
 ---
 
@@ -242,16 +257,22 @@ library permission at all** — nothing is prompted, and the app still only ever
 sees what was picked. The user also gets the search, albums and Favourites they
 already know.
 
-Two options are non-negotiable here:
+Three options are non-negotiable here:
 
 ```ts
 videoExportPreset: VideoExportPreset.Passthrough
 preferredAssetRepresentationMode: UIImagePickerPreferredAssetRepresentationMode.Current
+shouldDownloadFromNetwork: true
 ```
 
-Both stop the picker from re-encoding on the way out. A transcode would rewrite
-the frame rate, and frame-accurate comparison depends on the frame rate being the
-one the camera actually recorded.
+The first two stop the picker from re-encoding on the way out. A transcode would
+rewrite the frame rate, and frame-accurate comparison depends on the frame rate
+being the one the camera actually recorded.
+
+The third follows from the first: `Passthrough` is the one preset that will *not*
+fetch an iCloud-only asset by itself. With "Optimize iPhone Storage" enabled that
+is most older footage, so without this flag the picker fails on exactly the clips
+a user is most likely to reach for.
 
 The trade-off is persistence. The picker returns `assetId` — the MediaLibrary id
 — on the paths where the platform exposes it, and those picks are stored in the

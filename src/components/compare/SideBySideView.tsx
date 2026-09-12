@@ -12,7 +12,7 @@ import type { VideoPlayer } from 'expo-video';
 import { VideoSurface } from '@/components/VideoSurface';
 import { Text } from '@/components/ui';
 import { colors, radii, spacing } from '@/theme';
-import type { ResolvedClip } from '@/types';
+import type { ClipView, ResolvedClip } from '@/types';
 
 import type { CompareModeProps } from './types';
 
@@ -28,6 +28,8 @@ export function SideBySideView({
   comparisonPlayer,
   mirrorReference,
   mirrorComparison,
+  referenceView,
+  comparisonView,
   isWide,
 }: SideBySideViewProps) {
   return (
@@ -36,6 +38,7 @@ export function SideBySideView({
         clip={reference}
         player={referencePlayer}
         mirrored={mirrorReference}
+        view={referenceView}
         accent={colors.reference}
         badge="1"
       />
@@ -43,6 +46,7 @@ export function SideBySideView({
         clip={comparison}
         player={comparisonPlayer}
         mirrored={mirrorComparison}
+        view={comparisonView}
         accent={colors.comparison}
         badge="2"
       />
@@ -54,18 +58,28 @@ function Pane({
   clip,
   player,
   mirrored,
+  view,
   accent,
   badge,
 }: {
   clip: ResolvedClip;
   player: VideoPlayer;
   mirrored: boolean;
+  view: ClipView;
   accent: string;
   badge: string;
 }) {
   return (
     <View style={[styles.pane, { borderColor: accent }]}>
-      <VideoSurface player={player} mirrored={mirrored} contentFit="contain" style={styles.fill} />
+      <VideoSurface
+        player={player}
+        mirrored={mirrored}
+        scale={view.scale}
+        offsetX={view.offsetX}
+        offsetY={view.offsetY}
+        contentFit="contain"
+        style={styles.fill}
+      />
       <View style={[styles.badge, { backgroundColor: accent }]}>
         <Text variant="caption" color="#04121F" style={styles.badgeText}>
           {badge}

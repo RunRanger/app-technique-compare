@@ -82,6 +82,39 @@ export interface ResolvedClip {
   mirrored?: boolean;
 }
 
+/**
+ * How one clip is framed inside its surface.
+ *
+ * Two athletes filmed from different distances look like different-sized people
+ * even when perfectly synchronized, which makes shapes hard to compare. Zooming
+ * one clip to match the other is a display-only correction: it never touches the
+ * decoded video, the timeline, or the alignment.
+ */
+export interface ClipView {
+  /** Uniform zoom. 1 = untouched. */
+  scale: number;
+  /** Pan after zooming, as a fraction of the surface size. */
+  offsetX: number;
+  offsetY: number;
+}
+
+export const DEFAULT_CLIP_VIEW: ClipView = { scale: 1, offsetX: 0, offsetY: 0 };
+
+/** Zoom limits. Beyond these the image is either unusably soft or pointless. */
+export const CLIP_SCALE_MIN = 0.4;
+export const CLIP_SCALE_MAX = 3;
+/** Pan limits, as a fraction of the surface size. */
+export const CLIP_OFFSET_LIMIT = 0.5;
+
+export function clampClipView(view: ClipView): ClipView {
+  const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+  return {
+    scale: clamp(view.scale, CLIP_SCALE_MIN, CLIP_SCALE_MAX),
+    offsetX: clamp(view.offsetX, -CLIP_OFFSET_LIMIT, CLIP_OFFSET_LIMIT),
+    offsetY: clamp(view.offsetY, -CLIP_OFFSET_LIMIT, CLIP_OFFSET_LIMIT),
+  };
+}
+
 /** Visualization modes offered in comparison mode. */
 export type CompareMode = 'sideBySide' | 'overlay' | 'split';
 

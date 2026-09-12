@@ -17,16 +17,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Text } from '@/components/ui';
-import { poseRegistry } from '@/services/pose';
+import { analyzeWindow, poseRegistry, WINDOW_HALF_SPAN } from '@/services/pose';
 import { computeAutoSync, SIGNAL_CHANNELS, type AutoSyncResult, type SignalChannel } from '@/services/sync';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
 import type { ResolvedClip } from '@/types';
-
-/** Seconds analysed either side of the preview position. */
-const WINDOW_HALF_SPAN = 2;
-/** Pose sampling rate. Well above the movement's frequency content, far below video rate. */
-const SAMPLE_FPS = 15;
 
 interface AutoSyncPanelProps {
   reference: ResolvedClip;
@@ -80,56 +75,24 @@ export function AutoSyncPanel({
     setProgress(0);
 
     try {
-      const window = (clip: ResolvedClip, center: number) => {
-        const duration = clip.meta.durationSeconds ?? center + WINDOW_HALF_SPAN;
-        return {
-          startSeconds: Math.max(0, center - WINDOW_HALF_SPAN),
-          endSeconds: Math.min(duration, center + WINDOW_HALF_SPAN),
-        };
-      };
-
-      // Both clips are analysed over a window around the same nominal moment.
-      // The comparison clip's true event may sit outside it, which is exactly
-      // what the offset search is for — hence the generous half-span.
-      const referenceWindow = window(reference, previewTime);
-      const comparisonWindow = window(comparison, previewTime);
-
-      let referenceProgress = 0;
-      let comparisonProgress = 0;
-      const report = () => setProgress((referenceProgress + comparisonProgress) / 2);
-
-      const [referenceSequence, comparisonSequence] = await Promise.all([
-        poseRegistry.estimate(
-          {
-            uri: reference.uri,
-            sourceId: reference.ref.id,
-            sampleFps: SAMPLE_FPS,
-            ...referenceWindow,
-          },
-          (update) => {
-            referenceProgress = update.fraction;
-            report();
-          },
-          controller.signal
-        ),
-        poseRegistry.estimate(
-          {
-            uri: comparison.uri,
-            sourceId: comparison.ref.id,
-            sampleFps: SAMPLE_FPS,
-            ...comparisonWindow,
-          },
-          (update) => {
-            comparisonProgress = update.fraction;
-            report();
-          },
-          controller.signal
-        ),
-      ]);
-
+      const analysis = await analyzeWindow(
+        {
+          uri: reference.uri,
+          sourceId: reference.ref.id,
+          durationSeconds: reference.meta.durationSeconds,
+        },
+        {
+          uri: comparison.uri,
+          sourceId: comparison.ref.id,
+          durationSeconds: comparison.meta.durationSeconds,
+        },
+        previewTime,
+        setProgress,
+        controller.signal
+      );
       if (controller.signal.aborted) return;
 
-      const result = computeAutoSync(referenceSequence, comparisonSequence, {
+      const result = computeAutoSync(analysis.reference, analysis.comparison, {
         channel,
         maxOffsetSeconds: Math.max(2, WINDOW_HALF_SPAN * 2),
       });

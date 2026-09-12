@@ -10,6 +10,7 @@
 
 import { MockPoseEstimator } from './mockEstimator';
 import { NativePoseEstimator } from './nativeEstimator';
+import { TFLitePoseEstimator } from './tfliteEstimator';
 import type {
   PoseEstimationRequest,
   PoseEstimator,
@@ -91,9 +92,14 @@ export class PoseEstimatorRegistry {
 }
 
 /**
- * App-wide registry. Native first, simulation last — so the app is always
- * functional, and silently upgrades the moment a real model is linked in.
+ * App-wide registry, in priority order:
+ *
+ *  1. a custom native module, if a build provides one (see `nativeEstimator`);
+ *  2. BlazePose via TFLite — the model that actually ships;
+ *  3. the simulation, so the app still works on web or when the model cannot be
+ *     downloaded.
  */
 export const poseRegistry = new PoseEstimatorRegistry();
 poseRegistry.register(new NativePoseEstimator());
+poseRegistry.register(new TFLitePoseEstimator());
 poseRegistry.register(new MockPoseEstimator({ msPerFrame: 1 }));

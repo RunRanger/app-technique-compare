@@ -38,6 +38,8 @@ export function SplitView({
   comparisonPlayer,
   mirrorReference,
   mirrorComparison,
+  referenceView,
+  comparisonView,
   position,
   onPositionChange,
 }: SplitViewProps) {
@@ -90,6 +92,9 @@ export function SplitView({
         <VideoSurface
           player={referencePlayer}
           mirrored={mirrorReference}
+          scale={referenceView.scale}
+          offsetX={referenceView.offsetX}
+          offsetY={referenceView.offsetY}
           contentFit="contain"
           style={styles.fill}
           overlapping
@@ -103,6 +108,9 @@ export function SplitView({
               <VideoSurface
                 player={comparisonPlayer}
                 mirrored={mirrorComparison}
+                scale={comparisonView.scale}
+                offsetX={comparisonView.offsetX}
+                offsetY={comparisonView.offsetY}
                 contentFit="contain"
                 style={styles.fill}
                 overlapping

@@ -30,15 +30,17 @@ import { useClipPlayer } from '@/playback/useClipPlayer';
 import { useCollectionStore } from '@/state/collectionStore';
 import { useOffsetMemory, useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
-import { DEFAULT_FPS, type ClipSlot, type VideoMeta } from '@/types';
+import { DEFAULT_FPS, type ClipSlot, type ClipView, type VideoMeta } from '@/types';
 
 import { AutoSyncPanel } from './parts/AutoSyncPanel';
+import { SizePanel } from './parts/SizePanel';
 
-type SyncTab = 'manual' | 'auto';
+type SyncTab = 'manual' | 'auto' | 'size';
 
 const TABS: { key: SyncTab; label: string; icon: string }[] = [
   { key: 'manual', label: 'Manual', icon: '⇤⇥' },
   { key: 'auto', label: 'Auto', icon: '◎' },
+  { key: 'size', label: 'Size', icon: '⤢' },
 ];
 
 export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
@@ -50,6 +52,8 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
   const updateClipMeta = useSessionStore((state) => state.updateClipMeta);
   const mirrorReference = useSessionStore((state) => state.mirrorReference);
   const mirrorComparison = useSessionStore((state) => state.mirrorComparison);
+  const referenceView = useSessionStore((state) => state.referenceView);
+  const comparisonView = useSessionStore((state) => state.comparisonView);
   const toggleMirrored = useSessionStore((state) => state.toggleMirrored);
   const setCollectionMirrored = useCollectionStore((state) => state.setMirrored);
   const remember = useOffsetMemory((state) => state.remember);
@@ -176,6 +180,7 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
           badge="1"
           accent={colors.reference}
           mirrored={mirrorReference}
+          view={referenceView}
           onToggleMirror={() => handleMirror('reference')}
         />
         <PreviewPane
@@ -184,6 +189,7 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
           badge="2"
           accent={colors.comparison}
           mirrored={mirrorComparison}
+          view={comparisonView}
           onToggleMirror={() => handleMirror('comparison')}
         />
       </View>
@@ -277,7 +283,9 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
               </Text>
             </View>
           </Card>
-        ) : (
+        ) : null}
+
+        {tab === 'auto' ? (
           <AutoSyncPanel
             reference={reference}
             comparison={comparison}
@@ -288,7 +296,16 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
             }}
             onError={(message) => Alert.alert('Auto-sync', message)}
           />
-        )}
+        ) : null}
+
+        {tab === 'size' ? (
+          <SizePanel
+            reference={reference}
+            comparison={comparison}
+            previewTime={previewTime}
+            onError={(message) => Alert.alert('Match sizes', message)}
+          />
+        ) : null}
       </ScrollView>
 
       <View style={styles.cta}>
@@ -304,6 +321,7 @@ function PreviewPane({
   badge,
   accent,
   mirrored,
+  view,
   onToggleMirror,
 }: {
   player: React.ComponentProps<typeof VideoSurface>['player'];
@@ -311,11 +329,20 @@ function PreviewPane({
   badge: string;
   accent: string;
   mirrored: boolean;
+  view: ClipView;
   onToggleMirror: () => void;
 }) {
   return (
     <View style={[styles.pane, { borderColor: accent }]}>
-      <VideoSurface player={player} mirrored={mirrored} contentFit="contain" style={styles.fill} />
+      <VideoSurface
+        player={player}
+        mirrored={mirrored}
+        scale={view.scale}
+        offsetX={view.offsetX}
+        offsetY={view.offsetY}
+        contentFit="contain"
+        style={styles.fill}
+      />
 
       <View style={[styles.badge, { backgroundColor: accent }]}>
         <Text variant="caption" color="#04121F" style={styles.badgeText}>

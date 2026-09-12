@@ -1,6 +1,6 @@
 import type { VideoPlayer } from 'expo-video';
 
-import type { ResolvedClip } from '@/types';
+import type { ClipView, ResolvedClip } from '@/types';
 
 /**
  * What every visualization mode needs. The players are created and owned by the
@@ -13,4 +13,6 @@ export interface CompareModeProps {
   comparisonPlayer: VideoPlayer;
   mirrorReference: boolean;
   mirrorComparison: boolean;
+  referenceView: ClipView;
+  comparisonView: ClipView;
 }

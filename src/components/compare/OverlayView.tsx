@@ -28,6 +28,8 @@ export function OverlayView({
   comparisonPlayer,
   mirrorReference,
   mirrorComparison,
+  referenceView,
+  comparisonView,
   opacity,
   onOpacityChange,
 }: OverlayViewProps) {
@@ -37,6 +39,9 @@ export function OverlayView({
         <VideoSurface
           player={referencePlayer}
           mirrored={mirrorReference}
+          scale={referenceView.scale}
+          offsetX={referenceView.offsetX}
+          offsetY={referenceView.offsetY}
           contentFit="contain"
           style={styles.fill}
           overlapping
@@ -44,6 +49,9 @@ export function OverlayView({
         <VideoSurface
           player={comparisonPlayer}
           mirrored={mirrorComparison}
+          scale={comparisonView.scale}
+          offsetX={comparisonView.offsetX}
+          offsetY={comparisonView.offsetY}
           contentFit="contain"
           style={styles.fill}
           opacity={opacity}

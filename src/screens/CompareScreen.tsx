@@ -53,6 +53,8 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
   const setMuted = useSessionStore((state) => state.setMuted);
   const mirrorReference = useSessionStore((state) => state.mirrorReference);
   const mirrorComparison = useSessionStore((state) => state.mirrorComparison);
+  const referenceView = useSessionStore((state) => state.referenceView);
+  const comparisonView = useSessionStore((state) => state.comparisonView);
   const updateClipMeta = useSessionStore((state) => state.updateClipMeta);
   const setClip = useSessionStore((state) => state.setClip);
 
@@ -137,6 +139,8 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
     comparisonPlayer,
     mirrorReference,
     mirrorComparison,
+    referenceView,
+    comparisonView,
   };
 
   return (

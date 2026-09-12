@@ -15,7 +15,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import type { ClipSlot, CompareMode, ResolvedClip, VideoMeta } from '@/types';
+import {
+  clampClipView,
+  DEFAULT_CLIP_VIEW,
+  type ClipSlot,
+  type ClipView,
+  type CompareMode,
+  type ResolvedClip,
+  type VideoMeta,
+} from '@/types';
 import type { AutoSyncResult } from '@/services/sync/autoSync';
 
 export interface SessionState {
@@ -35,6 +43,12 @@ export interface SessionState {
   playbackRate: number;
   mirrorReference: boolean;
   mirrorComparison: boolean;
+  /**
+   * Per-clip framing, so two athletes filmed from different distances can be
+   * brought to the same apparent size before comparing.
+   */
+  referenceView: ClipView;
+  comparisonView: ClipView;
 
   setClip: (slot: ClipSlot, clip: ResolvedClip | null) => void;
   /**
@@ -58,6 +72,8 @@ export interface SessionState {
   setPlaybackRate: (rate: number) => void;
   setMirrored: (slot: ClipSlot, mirrored: boolean) => void;
   toggleMirrored: (slot: ClipSlot) => void;
+  setClipView: (slot: ClipSlot, view: Partial<ClipView>) => void;
+  resetClipView: (slot: ClipSlot) => void;
   /** Records fps/duration once the player reports them. */
   updateClipMeta: (slot: ClipSlot, meta: Partial<VideoMeta>) => void;
   reset: () => void;
@@ -75,12 +91,24 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   playbackRate: 1,
   mirrorReference: false,
   mirrorComparison: false,
+  referenceView: { ...DEFAULT_CLIP_VIEW },
+  comparisonView: { ...DEFAULT_CLIP_VIEW },
 
   setClip: (slot, clip) =>
     set(() =>
       slot === 'reference'
-        ? { reference: clip, lastAutoSync: null, mirrorReference: clip?.mirrored ?? false }
-        : { comparison: clip, lastAutoSync: null, mirrorComparison: clip?.mirrored ?? false }
+        ? {
+            reference: clip,
+            lastAutoSync: null,
+            mirrorReference: clip?.mirrored ?? false,
+            referenceView: { ...DEFAULT_CLIP_VIEW },
+          }
+        : {
+            comparison: clip,
+            lastAutoSync: null,
+            mirrorComparison: clip?.mirrored ?? false,
+            comparisonView: { ...DEFAULT_CLIP_VIEW },
+          }
     ),
 
   assignToNextSlot: (clip) => {
@@ -88,8 +116,18 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     const slot: ClipSlot = reference == null ? 'reference' : 'comparison';
     set(
       slot === 'reference'
-        ? { reference: clip, lastAutoSync: null, mirrorReference: clip.mirrored ?? false }
-        : { comparison: clip, lastAutoSync: null, mirrorComparison: clip.mirrored ?? false }
+        ? {
+            reference: clip,
+            lastAutoSync: null,
+            mirrorReference: clip.mirrored ?? false,
+            referenceView: { ...DEFAULT_CLIP_VIEW },
+          }
+        : {
+            comparison: clip,
+            lastAutoSync: null,
+            mirrorComparison: clip.mirrored ?? false,
+            comparisonView: { ...DEFAULT_CLIP_VIEW },
+          }
     );
     return slot;
   },
@@ -109,15 +147,25 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     ),
 
   swapClips: () => {
-    const { reference, comparison, offsetSeconds, mirrorReference, mirrorComparison } = get();
+    const {
+      reference,
+      comparison,
+      offsetSeconds,
+      mirrorReference,
+      mirrorComparison,
+      referenceView,
+      comparisonView,
+    } = get();
     set({
       reference: comparison,
       comparison: reference,
       // Swapping the clips inverts the meaning of the offset.
       offsetSeconds: -offsetSeconds,
-      // Mirroring belongs to the clip, so it travels with it.
+      // Mirroring and framing belong to the clip, so they travel with it.
       mirrorReference: mirrorComparison,
       mirrorComparison: mirrorReference,
+      referenceView: comparisonView,
+      comparisonView: referenceView,
       lastAutoSync: null,
     });
   },
@@ -139,6 +187,20 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
       slot === 'reference'
         ? { mirrorReference: !state.mirrorReference }
         : { mirrorComparison: !state.mirrorComparison }
+    ),
+
+  setClipView: (slot, view) =>
+    set((state) => {
+      const current = slot === 'reference' ? state.referenceView : state.comparisonView;
+      const next = clampClipView({ ...current, ...view });
+      return slot === 'reference' ? { referenceView: next } : { comparisonView: next };
+    }),
+
+  resetClipView: (slot) =>
+    set(
+      slot === 'reference'
+        ? { referenceView: { ...DEFAULT_CLIP_VIEW } }
+        : { comparisonView: { ...DEFAULT_CLIP_VIEW } }
     ),
 
   updateClipMeta: (slot, meta) =>

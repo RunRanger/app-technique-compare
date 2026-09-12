@@ -38,12 +38,18 @@ alternatives rather than a sequence.
 - **Auto** — pose estimation over a window around the moment of interest,
   extracting a motion signal and solving for the offset. It fills the same slider
   you would move by hand, with its confidence and reasoning shown.
+- **Size** — bring both athletes to the same apparent size, by zoom and pan
+  sliders or by measuring it automatically. Apparent size is a camera artefact,
+  and it makes two otherwise identical shapes hard to compare.
 - **Mirror** — flip either clip horizontally, for a routine performed the other
   way round or filmed from the opposite side. Stored on the collection entry,
   because it is a property of the footage; it travels with the clip when the two
   are swapped.
 - Alignments are remembered per clip pair, so re-opening two clips restores the
   offset you dialled in.
+
+Framing is display-only throughout: zoom, pan and mirroring never touch the
+decoded video, the timeline or the alignment.
 
 Mirroring does not affect auto-sync. Every signal channel it uses is
 mirror-invariant — the height channels read only `y`, overall motion reads only
@@ -94,7 +100,7 @@ or use EAS Build for either.
 npm run verify        # all of the below
 npm run check:deps    # native deps vs. the Expo SDK's pinned versions
 npm run typecheck     # tsc --noEmit
-npm test              # 109 unit tests
+npm test              # 150 unit tests
 npm run lint
 ```
 
@@ -189,53 +195,94 @@ after which it keeps only the id.
 
 ---
 
-## Plugging in a real pose model
+## The pose model
 
-The app ships **without** a bundled model. What it ships is the entire pipeline
-around one — sampling, signal extraction, event detection and the offset solver
-are real, tested code. A `MockPoseEstimator` generates deterministic synthetic
-landmarks so auto-sync runs end to end on a simulator, and the UI says plainly
-when it is doing so.
+The app runs **BlazePose Lite** (MediaPipe) on device through TFLite. Per sampled
+frame:
 
-To add a real backend, implement one interface:
+1. `expo-video-thumbnails` decodes one frame to a JPEG — natively, because
+   pushing raw frames across the JS bridge would dominate the runtime;
+2. `jpeg-js` turns it into RGBA pixels;
+3. the pixels are letterboxed into the model's 256×256 float32 input;
+4. `react-native-fast-tflite` runs the landmark model, using the Core ML
+   delegate on iOS and the GPU delegate on Android;
+5. the output is mapped back to normalized frame coordinates.
 
-```ts
-interface PoseEstimator {
-  readonly id: string;
-  readonly displayName: string;
-  isAvailable(): Promise<boolean>;
-  prepare?(): Promise<void>;
-  estimate(
-    request: PoseEstimationRequest,
-    onProgress?: (p: PoseProgress) => void,
-    signal?: AbortSignal
-  ): Promise<PoseSequence>;
-}
+The model is **downloaded once at first use and cached** in app storage, from
+Google's official MediaPipe asset CDN, rather than committed here — it is ~2.8 MB
+of binary that would otherwise sit in every checkout and every build. Without a
+network connection on that first run, the app falls back to the simulated
+estimator and says so.
+
+### What was verified, and how
+
+The model's interface was read off the real file rather than assumed, by running
+it under `tflite_runtime`:
+
+```
+input   [1, 256, 256, 3] float32
+output0 [1, 195]   39 landmarks × 5 — x, y, z, visibility, presence
+output1 [1, 1]     pose presence
 ```
 
-then register it ahead of the mock:
+Two details would have been wrong from memory, and the check caught both:
+
+- **x and y come back in pixels of the 256×256 input**, not normalized, so they
+  need dividing by the input size before the letterbox mapping is undone.
+- **visibility and presence are logits**, spanning roughly ±18, so they need a
+  sigmoid. `output1` does *not* — it is already a probability, and reads ~0 for a
+  frame with no person in it, which makes it a dependable "found nobody" gate.
+
+### The one deliberate simplification
+
+This runs the landmark model on the whole frame, **without the BlazePose person
+detector that normally precedes it**. The full two-stage pipeline decodes SSD
+anchors, then crops and rotates a region of interest before the landmark pass.
+Skipping it costs accuracy when the athlete is small or far off-centre, and
+avoids a large amount of intricate, easily-wrong decoding. For technique video —
+one athlete, framed deliberately, filling much of the shot — that is a reasonable
+trade, and the pose score gates the frames where it does not hold.
+
+`pose_detection.tflite` sits on the same CDN, so the second stage can be added
+later without disturbing anything around it.
+
+### Swapping in a different model
+
+The registry tries estimators in order and takes the first available one:
+
+1. `NativePoseEstimator` — a custom Expo native module, if a build provides one;
+2. `TFLitePoseEstimator` — BlazePose, the one that ships;
+3. `MockPoseEstimator` — deterministic synthetic landmarks, so the app still
+   works on web or before the model has been downloaded.
+
+Registering a better estimator ahead of these is the whole integration; nothing
+downstream changes, because signal extraction, event detection and both solvers
+are model-agnostic.
 
 ```ts
 poseRegistry.register(new MyPoseEstimator());
 ```
 
-The registry picks the first estimator whose `isAvailable()` resolves true, so a
-real model takes over automatically and nothing else changes.
-
-`NativePoseEstimator` (`services/pose/nativeEstimator.ts`) is a ready-made
-adapter for the usual case — an Expo native module. It looks up
-`ExpoPoseLandmarker` via `requireOptionalNativeModule` and reports itself
-unavailable when absent, which is what lets the fallback work with no
-conditional logic anywhere else. Implement `NativePoseModule` with MediaPipe
-Pose Landmarker, TF-Lite MoveNet, iOS Vision, or ML Kit and it will be used.
-
-**Decode frames natively.** `AVAssetImageGenerator` on iOS,
-`MediaMetadataRetriever`/`MediaCodec` on Android. Shipping raw frames across the
-JS bridge would dominate the runtime.
-
 Landmarks must be normalized to the frame (0–1, origin top-left) using the names
 in `LANDMARK_NAMES`. Note that `y` grows *downward* — the signal extractors
 handle the flip.
+
+### How automatic sizing works
+
+Both athletes' **on-screen body length** — ankle midpoint to shoulder midpoint —
+is measured across the analysed window, and the ratio of the medians is the zoom
+correction. Two properties make that the right measure:
+
+- it does not change when the athlete moves around the frame, so panning cannot
+  disturb it, and
+- it barely changes through a skill, unlike bounding-box height, which collapses
+  in a tuck and stretches in a layout — a bounding box would make the answer
+  depend on which instant happened to be sampled.
+
+Per-frame ratios are reduced with a median rather than a mean: a few
+badly-tracked frames are normal, and a median ignores them instead of being
+dragged by them. Confidence is coverage over both clips, because a ratio from two
+frames out of sixty is arithmetically fine and practically meaningless.
 
 ### How auto-sync decides
 
@@ -341,6 +388,15 @@ only ever touches files this app placed there.
 - **Split mode** clips the upper surface with a fixed-width container while the
   video inside keeps the full stage width. Sizing the video to the revealed width
   would re-letterbox it as the divider moves and the halves would stop lining up.
+- **`surfaceType` is fixed to `textureView`.** The default Android `SurfaceView`
+  is punched through the view hierarchy: it ignores opacity and transforms
+  entirely, which is why mirroring did nothing and a blended overlay came out
+  black. It is a constant rather than per-mode because expo-video documents that
+  the prop must not change at runtime. Opacity and transforms are applied to the
+  `VideoView` itself, never to a wrapper.
+- **`react-native-fast-tflite` and `react-native-nitro-modules` are not in
+  Expo's bundled module list**, so `check:deps` cannot validate them against the
+  SDK the way it does the rest. Their versions are on their own.
 - **iOS limited photo access** is treated as usable, not as a failure, with a
   path to widen the selection.
 - **`requireFullScreen: true`** on iOS is required for orientation locking to
@@ -353,8 +409,8 @@ only ever touches files this app placed there.
 
 ## Not implemented
 
-- No bundled pose model (see above) — auto-sync runs on simulated landmarks
-  until one is linked in.
+- The BlazePose person-detector stage (see above); the landmark model runs on
+  the whole frame.
 - No thumbnails in the collection list; entries are text with a play glyph.
   Real thumbnails mean a player per row and a cache, which is a feature of its
   own.

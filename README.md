@@ -53,12 +53,22 @@ npm install
 npx expo start
 ```
 
-The app uses `expo-camera`, `expo-video` and `expo-media-library`, so it needs a
-development build rather than Expo Go:
+Every native dependency is on Expo's bundled-modules list, so the app loads in
+**Expo Go** and `npm start` alone is enough to click through the workflows.
+
+Expo Go runs its own native container, though, so the config plugins in
+`app.json` do not apply there: you get Expo Go's generic permission wording
+instead of this app's, and the orientation and `expo-video` plugin options are
+ignored. To exercise those — and anything else native — build once:
 
 ```bash
 npx expo run:ios      # or: npx expo run:android
 ```
+
+That prebuilds `ios/`/`android/` (both gitignored) and compiles. After that
+`npm start` is all you need; a rebuild is only required when native dependencies
+or `app.json` change. iOS needs macOS + Xcode, Android needs the Android SDK,
+or use EAS Build for either.
 
 ```bash
 npm run typecheck     # tsc --noEmit

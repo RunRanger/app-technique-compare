@@ -20,6 +20,7 @@ export interface CollectionState {
   rename: (id: string, name: string) => void;
   remove: (id: string) => void;
   updateMeta: (id: string, meta: Partial<VideoMeta>) => void;
+  setMirrored: (id: string, mirrored: boolean) => void;
   get: (id: string) => CollectionItem | undefined;
 }
 
@@ -60,6 +61,11 @@ export const useCollectionStore = create<CollectionState>()(
           items: state.items.map((item) =>
             item.id === id ? { ...item, meta: { ...item.meta, ...meta } } : item
           ),
+        })),
+
+      setMirrored: (id, mirrored) =>
+        set((state) => ({
+          items: state.items.map((item) => (item.id === id ? { ...item, mirrored } : item)),
         })),
 
       get: (id) => get().items.find((item) => item.id === id),

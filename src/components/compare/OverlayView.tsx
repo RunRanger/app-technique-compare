@@ -9,49 +9,41 @@
 
 import { StyleSheet, View } from 'react-native';
 import Slider from '@react-native-community/slider';
-import type { VideoPlayer } from 'expo-video';
 
 import { VideoSurface } from '@/components/VideoSurface';
 import { Text } from '@/components/ui';
 import { colors, radii, spacing } from '@/theme';
-import type { ResolvedClip, VideoMeta } from '@/types';
 
-interface OverlayViewProps {
-  reference: ResolvedClip;
-  comparison: ResolvedClip;
+import type { CompareModeProps } from './types';
+
+interface OverlayViewProps extends CompareModeProps {
   opacity: number;
   onOpacityChange: (value: number) => void;
-  onReferencePlayer: (player: VideoPlayer) => void;
-  onComparisonPlayer: (player: VideoPlayer) => void;
-  onReferenceMeta: (meta: Partial<VideoMeta>) => void;
-  onComparisonMeta: (meta: Partial<VideoMeta>) => void;
 }
 
 export function OverlayView({
   reference,
   comparison,
+  referencePlayer,
+  comparisonPlayer,
+  mirrorReference,
+  mirrorComparison,
   opacity,
   onOpacityChange,
-  onReferencePlayer,
-  onComparisonPlayer,
-  onReferenceMeta,
-  onComparisonMeta,
 }: OverlayViewProps) {
   return (
     <View style={styles.container}>
       <View style={styles.stage}>
         <VideoSurface
-          uri={reference.uri}
-          onPlayerReady={onReferencePlayer}
-          onMetadata={onReferenceMeta}
+          player={referencePlayer}
+          mirrored={mirrorReference}
           contentFit="contain"
           style={styles.fill}
           overlapping
         />
         <VideoSurface
-          uri={comparison.uri}
-          onPlayerReady={onComparisonPlayer}
-          onMetadata={onComparisonMeta}
+          player={comparisonPlayer}
+          mirrored={mirrorComparison}
           contentFit="contain"
           style={styles.fill}
           opacity={opacity}

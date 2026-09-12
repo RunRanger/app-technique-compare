@@ -60,6 +60,12 @@ export interface CollectionItem {
   meta: VideoMeta;
   createdAt: number;
   note?: string;
+  /**
+   * Whether this clip should be shown flipped horizontally. Stored per entry
+   * because it is a property of the footage — a routine performed the other way
+   * round, or a camera behind the athlete — not of a single comparison.
+   */
+  mirrored?: boolean;
 }
 
 /** A clip that has been resolved to something a player can actually open. */
@@ -72,6 +78,8 @@ export interface ResolvedClip {
   meta: VideoMeta;
   /** Set when the clip came from the saved collection. */
   collectionItemId?: string;
+  /** Show the image flipped horizontally. */
+  mirrored?: boolean;
 }
 
 /** Visualization modes offered in comparison mode. */

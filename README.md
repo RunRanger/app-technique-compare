@@ -29,14 +29,27 @@ A fixed bottom bar holds the two ways to bring in new material:
 
 **2 · Sync**
 
-- **Offset slider** scrubs the temporal offset between the clips in real time,
-  with both frames on screen so you can see them agree.
-- **Frame steppers** (±1, ±10 frames) at the clip's real frame rate.
-- **Auto-sync** runs pose estimation over a window around the moment of
-  interest, extracts a motion signal, and solves for the offset. It fills the
-  same slider you would move by hand, with its confidence and reasoning shown.
+Both frames, the mirror toggles and the preview position stay on screen; the two
+*ways* of aligning sit behind **Manual** / **Auto** tabs, since they are
+alternatives rather than a sequence.
+
+- **Manual** — an offset slider scrubbing the temporal offset in real time, plus
+  frame steppers (±1, ±10) at the clip's real frame rate.
+- **Auto** — pose estimation over a window around the moment of interest,
+  extracting a motion signal and solving for the offset. It fills the same slider
+  you would move by hand, with its confidence and reasoning shown.
+- **Mirror** — flip either clip horizontally, for a routine performed the other
+  way round or filmed from the opposite side. Stored on the collection entry,
+  because it is a property of the footage; it travels with the clip when the two
+  are swapped.
 - Alignments are remembered per clip pair, so re-opening two clips restores the
   offset you dialled in.
+
+Mirroring does not affect auto-sync. Every signal channel it uses is
+mirror-invariant — the height channels read only `y`, overall motion reads only
+displacement magnitudes, and bilateral landmarks enter as their midpoint — so the
+solved offset is the same either way, and the flip stays a pure display
+transform.
 
 **3 · Compare**
 
@@ -81,7 +94,7 @@ or use EAS Build for either.
 npm run verify        # all of the below
 npm run check:deps    # native deps vs. the Expo SDK's pinned versions
 npm run typecheck     # tsc --noEmit
-npm test              # 98 unit tests
+npm test              # 109 unit tests
 npm run lint
 ```
 
@@ -108,6 +121,7 @@ src/
 ├── playback/         ── the core ──
 │   ├── timeline.ts       Pure offset/timeline math          (tested)
 │   ├── syncEngine.ts     Drift-correction policy, seek profiles (tested)
+│   ├── useClipPlayer.ts  Player creation + metadata, owned by the screen
 │   └── useSyncedPlayback.ts  Master transport over two players
 ├── services/
 │   ├── media/        MediaLibrary wrapper, system picker, clip resolution
@@ -281,6 +295,42 @@ sandboxed copy is handed over, the clip is used for the current session but
 deliberately *not* saved to the collection, because the copy would not survive a
 restart.
 
+### Who owns a player
+
+`useVideoPlayer` is built on `useReleasingSharedObject`: **the player is released
+when the component that called it unmounts.** So the component that *drives* a
+player must also be the one that creates it. Creating it in a child view and
+handing it up to a parent hands the parent a reference it does not control — when
+the child unmounts, the native object is freed while the parent's effects still
+hold it, and the next property write throws:
+
+```
+Cannot use shared object that was already released
+```
+
+`useClipPlayer` exists to make that ownership explicit, and both driving screens
+(Compare, Sync) call it. Beyond avoiding the crash, it means switching
+visualization modes only re-attaches existing players to new views: nothing is
+torn down, the playhead does not move, and buffered data survives.
+
+### What "persistent" means for a collection entry
+
+An entry has to survive a restart, and there are two ways to get there:
+
+- **A MediaLibrary asset id** — no copy at all. Used whenever the system picker
+  provides one, and for recordings saved to the user's library.
+- **A file in app storage** — used when the picker returns only a sandboxed cache
+  copy with no asset id (common on Android), or when the user declines library
+  write permission for a recording. The file is *moved* out of the cache, which
+  is reclaimable, into the app's documents directory.
+
+The second is a deliberate exception to the no-copy rule, and it is narrower than
+it looks: the picker has already made that copy, so moving it neither duplicates
+the bytes again nor adds anything to the user's gallery. Without it, adding a
+clip silently did nothing on platforms that omit the asset id. Removing such an
+entry deletes the file, and the confirmation dialog says so — `deletePersistedClip`
+only ever touches files this app placed there.
+
 ## Notes on platform specifics
 
 - **Android overlay/split modes** force `surfaceType="textureView"`. The default
@@ -295,7 +345,7 @@ restart.
   path to widen the selection.
 - **`requireFullScreen: true`** on iOS is required for orientation locking to
   work on iPad.
-- Three `eslint-disable` comments remain, each explained in place. They are all
+- Four `eslint-disable` comments remain, each explained in place. They are all
   the React Compiler ruleset modelling external mutable objects as frozen: an
   `expo-video` player is a handle to a native object whose documented API *is*
   property assignment, and `PanResponder.create` must run during render because

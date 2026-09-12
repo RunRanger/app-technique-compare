@@ -2,16 +2,24 @@
  * Synchronized comparison: one transport, three ways to look at the same two
  * clips.
  *
- * The three modes each mount their own pair of video surfaces, so switching tabs
- * recreates the players. The transport is rebuilt around whichever pair is
- * currently mounted, and the playhead is restored across the switch — the user
- * keeps their position in the movement.
+ * This screen owns both players. That is deliberate — see `useClipPlayer`: a
+ * player created inside a child view is released when that view unmounts, so
+ * switching visualization modes would free the native objects underneath the
+ * transport's own effects. Owning them here means a mode switch only swaps which
+ * views the players are attached to: nothing is torn down, the playhead does not
+ * move, and buffered data is kept.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import type { VideoPlayer } from 'expo-video';
 
 import { OverlayView } from '@/components/compare/OverlayView';
 import { SideBySideView } from '@/components/compare/SideBySideView';
@@ -20,11 +28,12 @@ import { TransportBar } from '@/components/compare/TransportBar';
 import { Button, Card, Screen, Text } from '@/components/ui';
 import type { RootScreenProps } from '@/navigation/types';
 import { formatOffset } from '@/playback/timeline';
-import { pickVideoFromLibrary } from '@/services/media';
+import { useClipPlayer } from '@/playback/useClipPlayer';
 import { useSyncedPlayback } from '@/playback/useSyncedPlayback';
+import { pickVideoFromLibrary } from '@/services/media';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
-import { COMPARE_MODES, DEFAULT_FPS, type ClipSlot, type VideoMeta } from '@/types';
+import { COMPARE_MODES, DEFAULT_FPS, type VideoMeta } from '@/types';
 
 const PLAYBACK_RATES = [0.25, 0.5, 1] as const;
 
@@ -42,15 +51,35 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
   const setPlaybackRate = useSessionStore((state) => state.setPlaybackRate);
   const muted = useSessionStore((state) => state.muted);
   const setMuted = useSessionStore((state) => state.setMuted);
-  const setClip = useSessionStore((state) => state.setClip);
+  const mirrorReference = useSessionStore((state) => state.mirrorReference);
+  const mirrorComparison = useSessionStore((state) => state.mirrorComparison);
   const updateClipMeta = useSessionStore((state) => state.updateClipMeta);
+  const setClip = useSessionStore((state) => state.setClip);
 
   const { width, height } = useWindowDimensions();
   const isWide = width > height;
 
-  const [referencePlayer, setReferencePlayer] = useState<VideoPlayer | null>(null);
-  const [comparisonPlayer, setComparisonPlayer] = useState<VideoPlayer | null>(null);
   const [replacing, setReplacing] = useState(false);
+
+  const handleReferenceMeta = useCallback(
+    (meta: Partial<VideoMeta>) => updateClipMeta('reference', meta),
+    [updateClipMeta]
+  );
+  const handleComparisonMeta = useCallback(
+    (meta: Partial<VideoMeta>) => updateClipMeta('comparison', meta),
+    [updateClipMeta]
+  );
+
+  // Created here, once, for the lifetime of the screen. `useClipPlayer` swaps the
+  // source when a clip changes, so replacing video 2 does not remount anything.
+  const referencePlayer = useClipPlayer({
+    uri: reference?.uri ?? null,
+    onMetadata: handleReferenceMeta,
+  });
+  const comparisonPlayer = useClipPlayer({
+    uri: comparison?.uri ?? null,
+    onMetadata: handleComparisonMeta,
+  });
 
   // Comparison is the one place rotating the device genuinely helps, so the
   // orientation lock is lifted here and restored on the way out.
@@ -72,36 +101,9 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
     muted,
   });
 
-  // Carry the playhead across a mode switch, which remounts both players.
-  const resumeTime = useRef<number | null>(null);
-  const handleModeChange = useCallback(
-    (next: typeof mode) => {
-      if (next === mode) return;
-      transport.pause();
-      resumeTime.current = transport.getTime();
-      setReferencePlayer(null);
-      setComparisonPlayer(null);
-      setMode(next);
-    },
-    [mode, setMode, transport]
-  );
-
-  useEffect(() => {
-    if (resumeTime.current == null) return;
-    if (!referencePlayer || !comparisonPlayer) return;
-    transport.seekTo(resumeTime.current, { exact: true });
-    resumeTime.current = null;
-  }, [referencePlayer, comparisonPlayer, transport]);
-
-  const handleMeta = useCallback(
-    (slot: ClipSlot) => (meta: Partial<VideoMeta>) => updateClipMeta(slot, meta),
-    [updateClipMeta]
-  );
-
   /**
    * Replace video 2 without leaving comparison: video 1, the offset and the
-   * playhead all stay as they are. Opens the system picker inline rather than
-   * navigating away, so a wrong pick costs nothing.
+   * playhead all stay as they are.
    */
   const replaceComparison = useCallback(async () => {
     transport.pause();
@@ -109,7 +111,6 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
     try {
       const picked = await pickVideoFromLibrary();
       if (!picked) return;
-      setComparisonPlayer(null);
       setClip('comparison', picked.clip);
     } catch (error) {
       Alert.alert('Could not open the picker', String(error));
@@ -129,13 +130,13 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
     );
   }
 
-  const surfaceProps = {
+  const modeProps = {
     reference,
     comparison,
-    onReferencePlayer: setReferencePlayer,
-    onComparisonPlayer: setComparisonPlayer,
-    onReferenceMeta: handleMeta('reference'),
-    onComparisonMeta: handleMeta('comparison'),
+    referencePlayer,
+    comparisonPlayer,
+    mirrorReference,
+    mirrorComparison,
   };
 
   return (
@@ -149,8 +150,12 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               accessibilityLabel={option.label}
-              onPress={() => handleModeChange(option.key)}
-              style={({ pressed }) => [styles.tab, active && styles.tabActive, pressed && styles.pressed]}
+              onPress={() => setMode(option.key)}
+              style={({ pressed }) => [
+                styles.tab,
+                active && styles.tabActive,
+                pressed && styles.pressed,
+              ]}
             >
               <Text variant="caption" color={active ? colors.text : colors.textMuted}>
                 {option.icon}  {option.label}
@@ -161,12 +166,20 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
       </View>
 
       <View style={styles.stage}>
-        {mode === 'sideBySide' ? <SideBySideView {...surfaceProps} isWide={isWide} /> : null}
+        {mode === 'sideBySide' ? <SideBySideView {...modeProps} isWide={isWide} /> : null}
         {mode === 'overlay' ? (
-          <OverlayView {...surfaceProps} opacity={overlayOpacity} onOpacityChange={setOverlayOpacity} />
+          <OverlayView
+            {...modeProps}
+            opacity={overlayOpacity}
+            onOpacityChange={setOverlayOpacity}
+          />
         ) : null}
         {mode === 'split' ? (
-          <SplitView {...surfaceProps} position={splitPosition} onPositionChange={setSplitPosition} />
+          <SplitView
+            {...modeProps}
+            position={splitPosition}
+            onPositionChange={setSplitPosition}
+          />
         ) : null}
       </View>
 

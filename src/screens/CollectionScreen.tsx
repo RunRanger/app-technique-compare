@@ -18,7 +18,13 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 
 import { Button, Card, Screen, Text } from '@/components/ui';
 import type { RootScreenProps } from '@/navigation/types';
 import { formatTimecode } from '@/playback/timeline';
-import { ClipUnavailableError, pickVideoFromLibrary, resolveClip } from '@/services/media';
+import {
+  ClipUnavailableError,
+  deletePersistedClip,
+  persistClipForCollection,
+  pickVideoFromLibrary,
+  resolveClip,
+} from '@/services/media';
 import { useCollectionStore } from '@/state/collectionStore';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
@@ -64,7 +70,7 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
           meta: item.meta,
           collectionItemId: item.id,
         });
-        assignToNextSlot(clip);
+        assignToNextSlot({ ...clip, mirrored: item.mirrored });
       } catch (error) {
         const message =
           error instanceof ClipUnavailableError ? error.message : 'Could not open this video.';
@@ -80,9 +86,13 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
   );
 
   /**
-   * System picker. A pick backed by a persistent asset id joins the collection;
-   * one that only produced a sandboxed copy is selected for this session but
-   * deliberately not saved, since the copy would not survive a restart.
+   * System picker: the clip always joins the collection, and is selected into
+   * the next free slot.
+   *
+   * `persistClipForCollection` is what makes "always" true. A pick backed by a
+   * MediaLibrary asset id is stored as a reference with nothing copied; a pick
+   * that only produced a sandboxed cache copy is relocated to app storage first,
+   * because a cache path is reclaimable and would leave a dead entry behind.
    */
   const addFromLibrary = useCallback(async () => {
     setPicking(true);
@@ -90,26 +100,32 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
       const picked = await pickVideoFromLibrary();
       if (!picked) return;
 
-      if (!picked.persistent) {
-        assignToNextSlot(picked.clip);
-        return;
-      }
-
       const existing = items.find((item) => item.ref.id === picked.clip.ref.id);
       if (existing) {
         // Already in the collection — select it rather than adding a duplicate.
-        assignToNextSlot({ ...picked.clip, name: existing.name, collectionItemId: existing.id });
+        assignToNextSlot({
+          ...picked.clip,
+          name: existing.name,
+          collectionItemId: existing.id,
+          mirrored: existing.mirrored,
+        });
         return;
       }
 
+      const persisted = await persistClipForCollection(picked.clip, picked.persistent);
       const item = addToCollection({
-        name: picked.clip.name,
-        ref: picked.clip.ref,
-        meta: picked.clip.meta,
+        name: persisted.name,
+        ref: persisted.ref,
+        meta: persisted.meta,
       });
-      assignToNextSlot({ ...picked.clip, name: item.name, collectionItemId: item.id });
+      assignToNextSlot({ ...persisted, name: item.name, collectionItemId: item.id });
     } catch (error) {
-      Alert.alert('Could not open the picker', String(error));
+      // Adding used to fail silently on platforms that return no asset id.
+      // Whatever goes wrong now, say so.
+      Alert.alert(
+        'Could not add the video',
+        error instanceof Error ? error.message : String(error)
+      );
     } finally {
       setPicking(false);
     }
@@ -119,10 +135,21 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
     (item: CollectionItem) => {
       Alert.alert(
         'Remove from collection?',
-        `"${item.name}" will be removed from the collection. The video stays in your library.`,
+        item.ref.kind === 'mediaLibrary'
+          ? `"${item.name}" will be removed from the collection. The video stays in your library.`
+          : `"${item.name}" was stored by this app, so removing it deletes the video.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => remove(item.id) },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () => {
+              // Frees the file only if this app relocated it into its own
+              // storage; library assets and cache paths are left alone.
+              deletePersistedClip(item.ref);
+              remove(item.id);
+            },
+          },
         ]
       );
     },
@@ -221,6 +248,7 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
                   </Text>
                   <Text variant="caption" muted>
                     {describe(item)}
+                    {item.mirrored ? '  ⇋ mirrored' : ''}
                   </Text>
                 </View>
 

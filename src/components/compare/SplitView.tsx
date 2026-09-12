@@ -16,23 +16,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
-import type { VideoPlayer } from 'expo-video';
 
 import { VideoSurface } from '@/components/VideoSurface';
 import { Text } from '@/components/ui';
 import { colors, radii, spacing } from '@/theme';
-import type { ResolvedClip, VideoMeta } from '@/types';
 
-interface SplitViewProps {
-  reference: ResolvedClip;
-  comparison: ResolvedClip;
+import type { CompareModeProps } from './types';
+
+interface SplitViewProps extends CompareModeProps {
   /** Divider position, 0..1 across the stage. */
   position: number;
   onPositionChange: (value: number) => void;
-  onReferencePlayer: (player: VideoPlayer) => void;
-  onComparisonPlayer: (player: VideoPlayer) => void;
-  onReferenceMeta: (meta: Partial<VideoMeta>) => void;
-  onComparisonMeta: (meta: Partial<VideoMeta>) => void;
 }
 
 const HANDLE_SIZE = 44;
@@ -40,12 +34,12 @@ const HANDLE_SIZE = 44;
 export function SplitView({
   reference,
   comparison,
+  referencePlayer,
+  comparisonPlayer,
+  mirrorReference,
+  mirrorComparison,
   position,
   onPositionChange,
-  onReferencePlayer,
-  onComparisonPlayer,
-  onReferenceMeta,
-  onComparisonMeta,
 }: SplitViewProps) {
   const [stageWidth, setStageWidth] = useState(0);
 
@@ -94,9 +88,8 @@ export function SplitView({
       <View style={styles.stage} onLayout={handleLayout}>
         {/* Base layer: the reference clip, full stage. */}
         <VideoSurface
-          uri={reference.uri}
-          onPlayerReady={onReferencePlayer}
-          onMetadata={onReferenceMeta}
+          player={referencePlayer}
+          mirrored={mirrorReference}
           contentFit="contain"
           style={styles.fill}
           overlapping
@@ -108,29 +101,15 @@ export function SplitView({
           <View style={[styles.clip, { width: revealWidth }]} pointerEvents="none">
             <View style={{ width: stageWidth, height: '100%' }}>
               <VideoSurface
-                uri={comparison.uri}
-                onPlayerReady={onComparisonPlayer}
-                onMetadata={onComparisonMeta}
+                player={comparisonPlayer}
+                mirrored={mirrorComparison}
                 contentFit="contain"
                 style={styles.fill}
                 overlapping
               />
             </View>
           </View>
-        ) : (
-          // Mount the second player even before layout, so both players exist
-          // and the transport can drive them from the first frame.
-          <View style={styles.hidden} pointerEvents="none">
-            <VideoSurface
-              uri={comparison.uri}
-              onPlayerReady={onComparisonPlayer}
-              onMetadata={onComparisonMeta}
-              contentFit="contain"
-              style={styles.fill}
-              overlapping
-            />
-          </View>
-        )}
+        ) : null}
 
         {stageWidth > 0 ? (
           <View
@@ -174,7 +153,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   clip: { position: 'absolute', top: 0, bottom: 0, left: 0, overflow: 'hidden' },
-  hidden: { position: 'absolute', width: 0, height: 0, overflow: 'hidden' },
   divider: {
     position: 'absolute',
     top: 0,

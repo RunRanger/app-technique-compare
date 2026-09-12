@@ -33,6 +33,8 @@ export interface SessionState {
   /** Mute during comparison — two soundtracks at once is rarely wanted. */
   muted: boolean;
   playbackRate: number;
+  mirrorReference: boolean;
+  mirrorComparison: boolean;
 
   setClip: (slot: ClipSlot, clip: ResolvedClip | null) => void;
   /**
@@ -54,6 +56,8 @@ export interface SessionState {
   setSplitPosition: (value: number) => void;
   setMuted: (muted: boolean) => void;
   setPlaybackRate: (rate: number) => void;
+  setMirrored: (slot: ClipSlot, mirrored: boolean) => void;
+  toggleMirrored: (slot: ClipSlot) => void;
   /** Records fps/duration once the player reports them. */
   updateClipMeta: (slot: ClipSlot, meta: Partial<VideoMeta>) => void;
   reset: () => void;
@@ -69,12 +73,14 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   splitPosition: 0.5,
   muted: true,
   playbackRate: 1,
+  mirrorReference: false,
+  mirrorComparison: false,
 
   setClip: (slot, clip) =>
     set(() =>
       slot === 'reference'
-        ? { reference: clip, lastAutoSync: null }
-        : { comparison: clip, lastAutoSync: null }
+        ? { reference: clip, lastAutoSync: null, mirrorReference: clip?.mirrored ?? false }
+        : { comparison: clip, lastAutoSync: null, mirrorComparison: clip?.mirrored ?? false }
     ),
 
   assignToNextSlot: (clip) => {
@@ -82,8 +88,8 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     const slot: ClipSlot = reference == null ? 'reference' : 'comparison';
     set(
       slot === 'reference'
-        ? { reference: clip, lastAutoSync: null }
-        : { comparison: clip, lastAutoSync: null }
+        ? { reference: clip, lastAutoSync: null, mirrorReference: clip.mirrored ?? false }
+        : { comparison: clip, lastAutoSync: null, mirrorComparison: clip.mirrored ?? false }
     );
     return slot;
   },
@@ -103,12 +109,15 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     ),
 
   swapClips: () => {
-    const { reference, comparison, offsetSeconds } = get();
+    const { reference, comparison, offsetSeconds, mirrorReference, mirrorComparison } = get();
     set({
       reference: comparison,
       comparison: reference,
       // Swapping the clips inverts the meaning of the offset.
       offsetSeconds: -offsetSeconds,
+      // Mirroring belongs to the clip, so it travels with it.
+      mirrorReference: mirrorComparison,
+      mirrorComparison: mirrorReference,
       lastAutoSync: null,
     });
   },
@@ -121,6 +130,16 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   setSplitPosition: (splitPosition) => set({ splitPosition: clamp01(splitPosition) }),
   setMuted: (muted) => set({ muted }),
   setPlaybackRate: (playbackRate) => set({ playbackRate }),
+
+  setMirrored: (slot, mirrored) =>
+    set(slot === 'reference' ? { mirrorReference: mirrored } : { mirrorComparison: mirrored }),
+
+  toggleMirrored: (slot) =>
+    set((state) =>
+      slot === 'reference'
+        ? { mirrorReference: !state.mirrorReference }
+        : { mirrorComparison: !state.mirrorComparison }
+    ),
 
   updateClipMeta: (slot, meta) =>
     set((state) => {

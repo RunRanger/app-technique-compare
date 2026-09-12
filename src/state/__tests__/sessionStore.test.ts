@@ -133,6 +133,49 @@ describe('sessionStore', () => {
   });
 });
 
+describe('mirroring', () => {
+  beforeEach(() => {
+    useSessionStore.getState().reset();
+    useSessionStore.setState({ mirrorReference: false, mirrorComparison: false });
+  });
+
+  it('toggles each slot independently', () => {
+    useSessionStore.getState().toggleMirrored('reference');
+    expect(useSessionStore.getState().mirrorReference).toBe(true);
+    expect(useSessionStore.getState().mirrorComparison).toBe(false);
+
+    useSessionStore.getState().toggleMirrored('comparison');
+    expect(useSessionStore.getState().mirrorComparison).toBe(true);
+  });
+
+  it('seeds the flag from the clip, so a mirrored entry comes back mirrored', () => {
+    useSessionStore.getState().setClip('reference', { ...clip('a'), mirrored: true });
+    expect(useSessionStore.getState().mirrorReference).toBe(true);
+
+    // And a clip without the flag clears it rather than inheriting the last one.
+    useSessionStore.getState().setClip('reference', clip('b'));
+    expect(useSessionStore.getState().mirrorReference).toBe(false);
+  });
+
+  it('seeds the flag through next-slot assignment too', () => {
+    useSessionStore.getState().assignToNextSlot({ ...clip('a'), mirrored: true });
+    expect(useSessionStore.getState().mirrorReference).toBe(true);
+  });
+
+  it('carries the flags along when the clips are swapped', () => {
+    useSessionStore.getState().setClip('reference', { ...clip('a'), mirrored: true });
+    useSessionStore.getState().setClip('comparison', clip('b'));
+
+    useSessionStore.getState().swapClips();
+
+    // Mirroring belongs to the footage, so it must follow the clip into slot 2.
+    const state = useSessionStore.getState();
+    expect(state.comparison?.name).toBe('a');
+    expect(state.mirrorComparison).toBe(true);
+    expect(state.mirrorReference).toBe(false);
+  });
+});
+
 describe('offset memory', () => {
   beforeEach(() => useOffsetMemory.setState({ offsets: {} }));
 

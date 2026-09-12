@@ -16,6 +16,7 @@ import type { RootScreenProps } from '@/navigation/types';
 import {
   discardTemporaryRecording,
   ensureMediaWritePermission,
+  persistClipForCollection,
   saveRecordingToLibrary,
 } from '@/services/media';
 import { useCollectionStore } from '@/state/collectionStore';
@@ -87,37 +88,54 @@ export function RecordPreviewScreen({ navigation, route }: RootScreenProps<'Reco
       setNaming(false);
       setSaving(true);
       try {
-        if (!(await ensureMediaWritePermission())) {
-          Alert.alert(
-            'Permission needed',
-            'Saving to your collection stores the video in your library, which needs permission.'
-          );
+        // Preferred path: the recording goes into the user's own library and the
+        // collection keeps only its asset id.
+        if (await ensureMediaWritePermission()) {
+          const saved = await saveRecordingToLibrary(uri, ALBUM_NAME);
+          const mergedMeta: VideoMeta = {
+            // The library reports dimensions and duration; only the player knows fps.
+            ...saved.meta,
+            fps: meta.fps ?? saved.meta.fps,
+          };
+
+          const item = addToCollection({ name, ref: saved.ref, meta: mergedMeta });
+          assign({
+            ref: saved.ref,
+            uri,
+            name: item.name,
+            meta: mergedMeta,
+            collectionItemId: item.id,
+          });
+          navigation.navigate('Collection');
           return;
         }
 
-        const saved = await saveRecordingToLibrary(uri, ALBUM_NAME);
-        const mergedMeta: VideoMeta = {
-          // The library reports dimensions and duration; only the player knows fps.
-          ...saved.meta,
-          fps: meta.fps ?? saved.meta.fps,
-        };
-
-        const item = addToCollection({ name, ref: saved.ref, meta: mergedMeta });
-        assign({
-          ref: saved.ref,
-          uri,
-          name: item.name,
-          meta: mergedMeta,
-          collectionItemId: item.id,
+        // Permission declined. Keep the recording in app storage rather than
+        // refusing to save it — the clip is still the user's, and the cache
+        // directory it currently sits in is reclaimable.
+        const persisted = await persistClipForCollection(
+          { ref: { kind: 'file', id: uri }, uri, name, meta },
+          false
+        );
+        const item = addToCollection({
+          name,
+          ref: persisted.ref,
+          meta: persisted.meta,
         });
+        assign({ ...persisted, name: item.name, collectionItemId: item.id });
+        Alert.alert(
+          'Saved in the app',
+          'Without permission to add to your library, the recording is stored inside the app instead. Removing it from the collection will delete it.'
+        );
         navigation.navigate('Collection');
+        return;
       } catch (error) {
         Alert.alert('Could not save', String(error));
       } finally {
         setSaving(false);
       }
     },
-    [addToCollection, assign, meta.fps, navigation, uri]
+    [addToCollection, assign, meta, navigation, uri]
   );
 
   return (

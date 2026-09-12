@@ -31,6 +31,7 @@ export function RecordPreviewScreen({ navigation, route }: RootScreenProps<'Reco
   const { slot, uri } = route.params;
 
   const setClip = useSessionStore((state) => state.setClip);
+  const assignToNextSlot = useSessionStore((state) => state.assignToNextSlot);
   const addToCollection = useCollectionStore((state) => state.add);
 
   const [meta, setMeta] = useState<VideoMeta>(EMPTY_META);
@@ -62,15 +63,24 @@ export function RecordPreviewScreen({ navigation, route }: RootScreenProps<'Reco
     navigation.replace('Record', { slot });
   }, [navigation, slot, uri]);
 
+  /** Assigns the recording to the slot it was started for, or the next free one. */
+  const assign = useCallback(
+    (clip: Parameters<typeof assignToNextSlot>[0]) => {
+      if (slot) setClip(slot, clip);
+      else assignToNextSlot(clip);
+    },
+    [assignToNextSlot, setClip, slot]
+  );
+
   const useForComparison = useCallback(() => {
-    setClip(slot, {
+    assign({
       ref: { kind: 'file', id: uri },
       uri,
       name: 'Recording',
       meta,
     });
-    navigation.navigate('Home');
-  }, [meta, navigation, setClip, slot, uri]);
+    navigation.navigate('Collection');
+  }, [assign, meta, navigation, uri]);
 
   const saveToCollection = useCallback(
     async (name: string) => {
@@ -93,21 +103,21 @@ export function RecordPreviewScreen({ navigation, route }: RootScreenProps<'Reco
         };
 
         const item = addToCollection({ name, ref: saved.ref, meta: mergedMeta });
-        setClip(slot, {
+        assign({
           ref: saved.ref,
           uri,
           name: item.name,
           meta: mergedMeta,
           collectionItemId: item.id,
         });
-        navigation.navigate('Home');
+        navigation.navigate('Collection');
       } catch (error) {
         Alert.alert('Could not save', String(error));
       } finally {
         setSaving(false);
       }
     },
-    [addToCollection, meta.fps, navigation, setClip, slot, uri]
+    [addToCollection, assign, meta.fps, navigation, uri]
   );
 
   return (

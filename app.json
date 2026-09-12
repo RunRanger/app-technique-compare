@@ -62,6 +62,13 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Technique Compare only reads the video you pick, so you can compare it without copying files.",
+          "cameraPermission": "Technique Compare uses the camera to record technique videos for side-by-side motion analysis."
+        }
+      ],
+      [
         "expo-video",
         {
           "supportsBackgroundPlayback": false,

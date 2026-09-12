@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import type { VideoPlayer } from 'expo-video';
 
@@ -20,6 +20,7 @@ import { TransportBar } from '@/components/compare/TransportBar';
 import { Button, Card, Screen, Text } from '@/components/ui';
 import type { RootScreenProps } from '@/navigation/types';
 import { formatOffset } from '@/playback/timeline';
+import { pickVideoFromLibrary } from '@/services/media';
 import { useSyncedPlayback } from '@/playback/useSyncedPlayback';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
@@ -41,6 +42,7 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
   const setPlaybackRate = useSessionStore((state) => state.setPlaybackRate);
   const muted = useSessionStore((state) => state.muted);
   const setMuted = useSessionStore((state) => state.setMuted);
+  const setClip = useSessionStore((state) => state.setClip);
   const updateClipMeta = useSessionStore((state) => state.updateClipMeta);
 
   const { width, height } = useWindowDimensions();
@@ -48,6 +50,7 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
 
   const [referencePlayer, setReferencePlayer] = useState<VideoPlayer | null>(null);
   const [comparisonPlayer, setComparisonPlayer] = useState<VideoPlayer | null>(null);
+  const [replacing, setReplacing] = useState(false);
 
   // Comparison is the one place rotating the device genuinely helps, so the
   // orientation lock is lifted here and restored on the way out.
@@ -95,18 +98,32 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
     [updateClipMeta]
   );
 
-  const retakeComparison = useCallback(() => {
-    // Keep video 1 and the offset; only video 2 is being replaced.
+  /**
+   * Replace video 2 without leaving comparison: video 1, the offset and the
+   * playhead all stay as they are. Opens the system picker inline rather than
+   * navigating away, so a wrong pick costs nothing.
+   */
+  const replaceComparison = useCallback(async () => {
     transport.pause();
-    navigation.navigate('Gallery', { slot: 'comparison' });
-  }, [navigation, transport]);
+    setReplacing(true);
+    try {
+      const picked = await pickVideoFromLibrary();
+      if (!picked) return;
+      setComparisonPlayer(null);
+      setClip('comparison', picked.clip);
+    } catch (error) {
+      Alert.alert('Could not open the picker', String(error));
+    } finally {
+      setReplacing(false);
+    }
+  }, [setClip, transport]);
 
   if (!reference || !comparison) {
     return (
       <Screen>
         <Card style={styles.missing}>
           <Text variant="heading">Nothing to compare</Text>
-          <Button label="Back" onPress={() => navigation.navigate('Home')} />
+          <Button label="Back" onPress={() => navigation.navigate('Collection')} />
         </Card>
       </Screen>
     );
@@ -192,7 +209,14 @@ export function CompareScreen({ navigation }: RootScreenProps<'Compare'>) {
           <Button
             label="Replace video 2"
             variant="ghost"
-            onPress={retakeComparison}
+            loading={replacing}
+            onPress={() => void replaceComparison()}
+            style={styles.utilityButton}
+          />
+          <Button
+            label="Record video 2"
+            variant="ghost"
+            onPress={() => navigation.navigate('Record', { slot: 'comparison' })}
             style={styles.utilityButton}
           />
         </ScrollView>

@@ -107,7 +107,7 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
           <Text variant="caption" muted>
             Go back and choose both a reference and a comparison video.
           </Text>
-          <Button label="Back" onPress={() => navigation.navigate('Home')} />
+          <Button label="Back" onPress={() => navigation.navigate('Collection')} />
         </Card>
       </Screen>
     );

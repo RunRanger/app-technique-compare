@@ -21,11 +21,16 @@ import { analyzeWindow, poseRegistry, WINDOW_HALF_SPAN } from '@/services/pose';
 import { computeAutoSync, SIGNAL_CHANNELS, type AutoSyncResult, type SignalChannel } from '@/services/sync';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
+import type { VideoPlayer } from 'expo-video';
+
 import type { ResolvedClip } from '@/types';
 
 interface AutoSyncPanelProps {
   reference: ResolvedClip;
   comparison: ResolvedClip;
+  /** The screen's live players, reused so the assets are not opened twice. */
+  referencePlayer?: VideoPlayer;
+  comparisonPlayer?: VideoPlayer;
   previewTime: number;
   onOffsetSuggested: (offsetSeconds: number) => void;
   onError: (message: string) => void;
@@ -34,6 +39,8 @@ interface AutoSyncPanelProps {
 export function AutoSyncPanel({
   reference,
   comparison,
+  referencePlayer,
+  comparisonPlayer,
   previewTime,
   onOffsetSuggested,
   onError,
@@ -80,11 +87,13 @@ export function AutoSyncPanel({
           uri: reference.uri,
           sourceId: reference.ref.id,
           durationSeconds: reference.meta.durationSeconds,
+          player: referencePlayer,
         },
         {
           uri: comparison.uri,
           sourceId: comparison.ref.id,
           durationSeconds: comparison.meta.durationSeconds,
+          player: comparisonPlayer,
         },
         previewTime,
         setProgress,
@@ -104,7 +113,16 @@ export function AutoSyncPanel({
       setRunning(false);
       abortRef.current = null;
     }
-  }, [channel, comparison, onError, previewTime, reference, setAutoSyncResult]);
+  }, [
+    channel,
+    comparison,
+    comparisonPlayer,
+    onError,
+    previewTime,
+    reference,
+    referencePlayer,
+    setAutoSyncResult,
+  ]);
 
   return (
     <Card style={styles.card}>

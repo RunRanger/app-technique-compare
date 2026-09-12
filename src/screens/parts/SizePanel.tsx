@@ -20,6 +20,8 @@ import { analyzeWindow, poseRegistry } from '@/services/pose';
 import { computeAutoScale, type AutoScaleResult } from '@/services/sync';
 import { useSessionStore } from '@/state/sessionStore';
 import { colors, radii, spacing } from '@/theme';
+import type { VideoPlayer } from 'expo-video';
+
 import {
   CLIP_OFFSET_LIMIT,
   CLIP_SCALE_MAX,
@@ -31,11 +33,21 @@ import {
 interface SizePanelProps {
   reference: ResolvedClip;
   comparison: ResolvedClip;
+  /** The screen's live players, reused so the assets are not opened twice. */
+  referencePlayer?: VideoPlayer;
+  comparisonPlayer?: VideoPlayer;
   previewTime: number;
   onError: (message: string) => void;
 }
 
-export function SizePanel({ reference, comparison, previewTime, onError }: SizePanelProps) {
+export function SizePanel({
+  reference,
+  comparison,
+  referencePlayer,
+  comparisonPlayer,
+  previewTime,
+  onError,
+}: SizePanelProps) {
   const referenceView = useSessionStore((state) => state.referenceView);
   const comparisonView = useSessionStore((state) => state.comparisonView);
   const setClipView = useSessionStore((state) => state.setClipView);
@@ -74,8 +86,18 @@ export function SizePanel({ reference, comparison, previewTime, onError }: SizeP
 
     try {
       const analysis = await analyzeWindow(
-        { uri: reference.uri, sourceId: reference.ref.id, durationSeconds: reference.meta.durationSeconds },
-        { uri: comparison.uri, sourceId: comparison.ref.id, durationSeconds: comparison.meta.durationSeconds },
+        {
+          uri: reference.uri,
+          sourceId: reference.ref.id,
+          durationSeconds: reference.meta.durationSeconds,
+          player: referencePlayer,
+        },
+        {
+          uri: comparison.uri,
+          sourceId: comparison.ref.id,
+          durationSeconds: comparison.meta.durationSeconds,
+          player: comparisonPlayer,
+        },
         previewTime,
         setProgress,
         controller.signal
@@ -97,7 +119,16 @@ export function SizePanel({ reference, comparison, previewTime, onError }: SizeP
       setRunning(false);
       abortRef.current = null;
     }
-  }, [comparison, comparisonView.scale, onError, previewTime, reference, setClipView]);
+  }, [
+    comparison,
+    comparisonPlayer,
+    comparisonView.scale,
+    onError,
+    previewTime,
+    reference,
+    referencePlayer,
+    setClipView,
+  ]);
 
   return (
     <Card style={styles.card}>

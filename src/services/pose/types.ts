@@ -13,6 +13,8 @@
  * means a *smaller* y — the signal extractors flip this where it matters.
  */
 
+import type { VideoPlayer } from 'expo-video';
+
 /** The landmarks the analysis layer relies on. A subset of the 33-point BlazePose topology. */
 export const LANDMARK_NAMES = [
   'nose',
@@ -63,6 +65,19 @@ export interface PoseSequence {
 export interface PoseEstimationRequest {
   /** Playable URI of the clip. */
   uri: string;
+  /**
+   * An already-loaded player for this clip, if the caller has one.
+   *
+   * Purely an optimization: an estimator that needs to decode frames can reuse
+   * it instead of opening the asset a second time, which is dead latency when a
+   * screen is displaying the clip anyway. Estimators must work without it.
+   */
+  player?: VideoPlayer;
+  /**
+   * Wall-clock time after which sampling should stop and the estimator should
+   * return what it has. Absent means "no deadline".
+   */
+  deadlineAt?: number;
   /** Stable id for cache keying. */
   sourceId: string;
   startSeconds: number;

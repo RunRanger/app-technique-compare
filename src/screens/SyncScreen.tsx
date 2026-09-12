@@ -289,6 +289,8 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
           <AutoSyncPanel
             reference={reference}
             comparison={comparison}
+            referencePlayer={referencePlayer}
+            comparisonPlayer={comparisonPlayer}
             previewTime={previewTime}
             onOffsetSuggested={(value) => {
               setOffset(clampOffset(value, referenceDuration, comparisonDuration));
@@ -302,6 +304,8 @@ export function SyncScreen({ navigation }: RootScreenProps<'Sync'>) {
           <SizePanel
             reference={reference}
             comparison={comparison}
+            referencePlayer={referencePlayer}
+            comparisonPlayer={comparisonPlayer}
             previewTime={previewTime}
             onError={(message) => Alert.alert('Match sizes', message)}
           />

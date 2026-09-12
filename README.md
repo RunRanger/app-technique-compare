@@ -207,13 +207,47 @@ after which it keeps only the id.
 The app runs **BlazePose Lite** (MediaPipe) on device through TFLite. Per sampled
 frame:
 
-1. `expo-video-thumbnails` decodes one frame to a JPEG — natively, because
-   pushing raw frames across the JS bridge would dominate the runtime;
-2. `jpeg-js` turns it into RGBA pixels;
+1. `player.generateThumbnailsAsync(times, { maxWidth, maxHeight })` decodes a
+   batch of frames in one native call, already scaled to near the model's input
+   size;
+2. `expo-image-manipulator` hands each native image out as JPEG bytes, and
+   `jpeg-js` expands those into pixels;
 3. the pixels are letterboxed into the model's 256×256 float32 input;
 4. `react-native-fast-tflite` runs the landmark model, using the Core ML
    delegate on iOS and the GPU delegate on Android;
 5. the output is mapped back to normalized frame coordinates.
+
+### Staying inside four seconds
+
+Analysis cost is almost entirely *frames × cost per frame*, and both halves were
+wrong in the first version: frames were extracted one at a time, each reopening
+and re-seeking the asset, and each full-resolution JPEG was then decoded in pure
+JavaScript. At 61 frames per clip that ran to tens of seconds.
+
+Four changes, in rough order of how much they bought:
+
+- **Batch extraction.** One native call per chunk walks the timeline once
+  instead of reopening the asset per frame.
+- **Native downscale.** Asking for a ~320px thumbnail moves the resize into
+  native code. A 1080p frame is ~2M pixels for `jpeg-js` to chew through; a
+  320px one is ~0.1M — roughly twenty times less JavaScript per frame, for
+  detail the model discards anyway.
+- **Fewer frames.** 8 fps over ±1.5 s is 25 frames per clip, against 61 before.
+  Both solvers fit a parabola around their peak, so they resolve position to a
+  fraction of a sample — a coarser grid costs far less precision than the frame
+  count suggests.
+- **Reusing the open player.** The sync screen already has both clips loaded, so
+  the estimator borrows those players rather than opening the assets again.
+
+On top of that a **deadline** (`budget.ts`) caps the worst case: each clip gets
+half the budget, and sampling stops before starting a chunk that would not fit,
+rather than after overshooting. Stopping early degrades instead of failing — the
+solvers work on a shorter span, and the sample rate is never changed mid-run so
+cross-correlation stays valid. A floor of 8 frames means it will always overrun
+rather than return something unusable.
+
+Running auto-sync and then auto-size over the same moment extracts once: the
+registry caches sequences per clip, window and rate.
 
 The model is **downloaded once at first use and cached** in app storage, from
 Google's official MediaPipe asset CDN, rather than committed here — it is ~2.8 MB

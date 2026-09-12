@@ -1,15 +1,26 @@
 /**
  * Real on-device pose estimation: BlazePose (MediaPipe) via TFLite.
  *
- * Pipeline per sampled frame:
- *   1. `expo-video-thumbnails` decodes one frame of the clip to a JPEG. Decoding
- *      happens natively — pulling raw frames across the JS bridge would dominate
- *      the runtime.
- *   2. `jpeg-js` turns that JPEG into RGBA pixels.
+ * Pipeline, per batch of sampled frames:
+ *   1. `player.generateThumbnailsAsync(times, { maxWidth, maxHeight })` decodes
+ *      many frames in one native call, already scaled down to roughly the
+ *      model's input size.
+ *   2. `expo-image-manipulator` turns each native image reference into JPEG
+ *      bytes, and `jpeg-js` expands those into pixels.
  *   3. The pixels are letterboxed into the model's 256×256 float32 input.
  *   4. `react-native-fast-tflite` runs the landmark model, hardware-accelerated
  *      where a delegate is available.
  *   5. The output is decoded back to normalized frame coordinates.
+ *
+ * Both halves of step 1 matter for speed. Extracting frames one at a time
+ * reopens and re-seeks the asset for every sample; batching lets the native
+ * generator walk the timeline once. And asking for a small thumbnail moves the
+ * downscale into native code — decoding a full 1080p JPEG in JavaScript costs
+ * roughly thirty times as much work per frame as decoding a 256px one, for
+ * detail the model immediately throws away.
+ *
+ * Sampling is bounded by {@link ANALYSIS_BUDGET_MS} rather than run to
+ * completion; see `budget.ts`.
  *
  * **This runs the landmark model on the whole frame, without the BlazePose
  * person detector that normally precedes it.** The full two-stage pipeline
@@ -28,16 +39,19 @@
  */
 
 import { Directory, File, Paths } from 'expo-file-system';
-import * as VideoThumbnails from 'expo-video-thumbnails';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 import { decode as decodeJpeg } from 'jpeg-js';
 import { loadTensorflowModel, type TensorflowModel } from 'react-native-fast-tflite';
 import { Platform } from 'react-native';
 
+import { base64ToBytes } from './base64';
 import {
   BLAZEPOSE_INPUT_SIZE,
   decodeBlazePoseFrame,
   readLandmarkTensor,
 } from './blazePose';
+import { ANALYSIS_BUDGET_MS, planSampling, shouldContinue } from './budget';
 import { computeLetterbox, rgbaToModelInput } from './letterbox';
 import {
   PoseEstimatorUnavailableError,
@@ -62,10 +76,21 @@ const MODEL_FILENAME = 'pose_landmark_lite.tflite';
 const MIN_POSE_SCORE = 0.2;
 
 /**
- * Thumbnail quality. The frame is about to be crushed to 256×256, so a high
- * quality JPEG only costs decode time for detail the model never sees.
+ * JPEG quality for the intermediate hand-off out of the native image. The frame
+ * is about to be crushed to 256×256 and fed to a landmark model, so anything
+ * higher buys detail nobody sees and costs decode time.
  */
-const THUMBNAIL_QUALITY = 0.6;
+const HANDOFF_QUALITY = 0.7;
+
+/**
+ * Frames requested per native call. Large enough that the asset is walked once
+ * rather than reopened constantly, small enough that progress still moves and
+ * the deadline is checked often.
+ */
+const CHUNK_SIZE = 6;
+
+/** Hard cap on frames per clip, independent of window length. */
+const MAX_FRAMES_PER_CLIP = 40;
 
 export class TFLitePoseEstimator implements PoseEstimator {
   readonly id = 'blazepose-tflite';
@@ -129,52 +154,123 @@ export class TFLitePoseEstimator implements PoseEstimator {
     signal?: AbortSignal
   ): Promise<PoseSequence> {
     const model = await this.ensureModel();
-
     const { uri, sourceId, startSeconds, endSeconds, sampleFps } = request;
-    const step = 1 / sampleFps;
-    const span = Math.max(0, endSeconds - startSeconds);
-    const framesTotal = Math.max(1, Math.floor(span * sampleFps) + 1);
+
+    const plan = planSampling(startSeconds, endSeconds, sampleFps, MAX_FRAMES_PER_CLIP);
+    const deadlineAt = request.deadlineAt ?? Date.now() + ANALYSIS_BUDGET_MS / 2;
+
+    // Reuse the caller's player when there is one: the Sync screen already has
+    // both clips open, and loading the asset again is pure latency.
+    const player = request.player ?? createVideoPlayer(uri);
+    const ownsPlayer = request.player == null;
 
     const frames: PoseFrame[] = [];
+    const startedAt = Date.now();
 
-    for (let i = 0; i < framesTotal; i++) {
-      if (signal?.aborted) throw abortError();
+    try {
+      for (let offset = 0; offset < plan.times.length; offset += CHUNK_SIZE) {
+        if (signal?.aborted) throw abortError();
 
-      const time = startSeconds + i * step;
-      try {
-        const frame = await this.estimateSingleFrame(model, uri, time);
-        if (frame) frames.push(frame);
-      } catch (error) {
-        // One unreadable frame should not abandon the whole analysis — the
-        // signal extractor interpolates across gaps by design.
-        if (__DEV__) console.warn(`[TFLitePoseEstimator] frame at ${time.toFixed(2)}s failed`, error);
+        const elapsed = Date.now() - startedAt;
+        const msPerFrame = frames.length > 0 ? elapsed / (offset || 1) : 0;
+        if (!shouldContinue(Date.now(), deadlineAt, offset, msPerFrame, CHUNK_SIZE)) break;
+
+        const times = plan.times.slice(offset, offset + CHUNK_SIZE);
+        const decoded = await this.runChunk(model, player, times);
+        frames.push(...decoded);
+
+        onProgress?.({
+          fraction: Math.min(1, (offset + times.length) / plan.times.length),
+          framesDone: offset + times.length,
+          framesTotal: plan.times.length,
+        });
       }
-
-      onProgress?.({ fraction: (i + 1) / framesTotal, framesDone: i + 1, framesTotal });
+    } finally {
+      // Only release a player this method created; the caller's is still in use.
+      if (ownsPlayer) {
+        try {
+          player.release();
+        } catch {
+          // Already gone; nothing to do.
+        }
+      }
     }
 
     if (frames.length === 0) {
       throw new Error('No athlete was detected anywhere in this part of the clip.');
     }
 
-    return { sourceId, sampleFps, frames };
+    // Report the rate actually achieved, not the one requested — every
+    // downstream time is derived from it.
+    return { sourceId, sampleFps: plan.sampleFps, frames };
   }
 
-  private async estimateSingleFrame(
+  /** One native extraction plus inference for each frame it produced. */
+  private async runChunk(
     model: TensorflowModel,
-    uri: string,
+    player: VideoPlayer,
+    times: number[]
+  ): Promise<PoseFrame[]> {
+    let thumbnails;
+    try {
+      thumbnails = await player.generateThumbnailsAsync(times, {
+        // A little over the model input, so the letterbox never upscales.
+        maxWidth: BLAZEPOSE_INPUT_SIZE + 64,
+        maxHeight: BLAZEPOSE_INPUT_SIZE + 64,
+      });
+    } catch (error) {
+      if (__DEV__) console.warn('[TFLitePoseEstimator] thumbnail batch failed', error);
+      return [];
+    }
+
+    const frames: PoseFrame[] = [];
+
+    for (let i = 0; i < thumbnails.length; i++) {
+      const thumbnail = thumbnails[i];
+      if (!thumbnail) continue;
+      // `actualTime` is where the decoder really landed, which can differ from
+      // the request by up to a keyframe interval. Using the requested time
+      // instead would bake that error straight into the alignment.
+      const timeSeconds = thumbnail.actualTime ?? times[i] ?? 0;
+
+      try {
+        const frame = await this.runFrame(model, thumbnail, timeSeconds);
+        if (frame) frames.push(frame);
+      } catch (error) {
+        // One unreadable frame should not abandon the analysis — the signal
+        // extractor interpolates across gaps by design.
+        if (__DEV__) console.warn(`[TFLitePoseEstimator] frame at ${timeSeconds}s failed`, error);
+      } finally {
+        try {
+          thumbnail.release();
+        } catch {
+          // Best-effort.
+        }
+      }
+    }
+
+    return frames;
+  }
+
+  private async runFrame(
+    model: TensorflowModel,
+    thumbnail: { width: number; height: number },
     timeSeconds: number
   ): Promise<PoseFrame | null> {
-    // expo-video-thumbnails takes milliseconds.
-    const thumbnail = await VideoThumbnails.getThumbnailAsync(uri, {
-      time: Math.max(0, Math.round(timeSeconds * 1000)),
-      quality: THUMBNAIL_QUALITY,
+    // The thumbnail is a native image reference; this is the hand-off to bytes.
+    const rendered = await ImageManipulator.manipulate(
+      thumbnail as never
+    ).renderAsync();
+    const saved = await rendered.saveAsync({
+      base64: true,
+      compress: HANDOFF_QUALITY,
+      format: SaveFormat.JPEG,
     });
 
-    const file = new File(thumbnail.uri);
     try {
-      const jpeg = decodeJpeg(new Uint8Array(await file.arrayBuffer()), { useTArray: true });
+      if (!saved.base64) throw new Error('Image encoding returned no data.');
 
+      const jpeg = decodeJpeg(base64ToBytes(saved.base64), { useTArray: true });
       const layout = computeLetterbox(jpeg.width, jpeg.height, BLAZEPOSE_INPUT_SIZE);
       const input = rgbaToModelInput(jpeg.data, layout);
 
@@ -188,8 +284,14 @@ export class TFLitePoseEstimator implements PoseEstimator {
 
       return decodeBlazePoseFrame(landmarks, poseScore, layout, timeSeconds);
     } finally {
-      // Thumbnails land in the cache directory and are never needed again.
       try {
+        rendered.release();
+      } catch {
+        // Best-effort.
+      }
+      // saveAsync writes into the cache; it is never needed again.
+      try {
+        const file = new File(saved.uri);
         if (file.exists) file.delete();
       } catch {
         // Cache cleanup is best-effort.

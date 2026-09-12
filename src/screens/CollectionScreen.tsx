@@ -12,7 +12,7 @@
  * has been scrolled.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button, Card, Screen, Text } from '@/components/ui';
@@ -42,12 +42,15 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
   const reference = useSessionStore((state) => state.reference);
   const comparison = useSessionStore((state) => state.comparison);
   const assignToNextSlot = useSessionStore((state) => state.assignToNextSlot);
+  const setClip = useSessionStore((state) => state.setClip);
   const clearSlot = useSessionStore((state) => state.clearSlot);
   const swapClips = useSessionStore((state) => state.swapClips);
 
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
+  const [addingToCollection, setAddingToCollection] = useState(false);
+  const [pickingSlot, setPickingSlot] = useState<ClipSlot | null>(null);
   const [renaming, setRenaming] = useState<CollectionItem | null>(null);
+  const listRef = useRef<FlatList<CollectionItem>>(null);
 
   const bothReady = reference != null && comparison != null;
 
@@ -86,50 +89,83 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
   );
 
   /**
-   * System picker: the clip always joins the collection, and is selected into
-   * the next free slot.
+   * Grows the collection. The pick is stored and named, but no slot changes —
+   * this is for building up a library of reference clips, not for setting up the
+   * comparison in front of you.
    *
-   * `persistClipForCollection` is what makes "always" true. A pick backed by a
-   * MediaLibrary asset id is stored as a reference with nothing copied; a pick
+   * `persistClipForCollection` is what makes storing reliable. A pick backed by
+   * a MediaLibrary asset id is kept as a reference with nothing copied; a pick
    * that only produced a sandboxed cache copy is relocated to app storage first,
    * because a cache path is reclaimable and would leave a dead entry behind.
    */
-  const addFromLibrary = useCallback(async () => {
-    setPicking(true);
+  const addToLibraryCollection = useCallback(async () => {
+    setAddingToCollection(true);
     try {
       const picked = await pickVideoFromLibrary();
       if (!picked) return;
 
-      const existing = items.find((item) => item.ref.id === picked.clip.ref.id);
-      if (existing) {
-        // Already in the collection — select it rather than adding a duplicate.
-        assignToNextSlot({
-          ...picked.clip,
-          name: existing.name,
-          collectionItemId: existing.id,
-          mirrored: existing.mirrored,
-        });
+      if (items.some((item) => item.ref.id === picked.clip.ref.id)) {
+        Alert.alert('Already in your collection', `"${picked.clip.name}" is already saved.`);
         return;
       }
 
       const persisted = await persistClipForCollection(picked.clip, picked.persistent);
-      const item = addToCollection({
+      addToCollection({
         name: persisted.name,
         ref: persisted.ref,
         meta: persisted.meta,
       });
-      assignToNextSlot({ ...persisted, name: item.name, collectionItemId: item.id });
+
+      // New entries go to the top, and the button that triggered this sits at the
+      // bottom of the list — so bring the result into view rather than leaving
+      // the user to wonder whether anything happened.
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
     } catch (error) {
-      // Adding used to fail silently on platforms that return no asset id.
-      // Whatever goes wrong now, say so.
       Alert.alert(
         'Could not add the video',
         error instanceof Error ? error.message : String(error)
       );
     } finally {
-      setPicking(false);
+      setAddingToCollection(false);
     }
-  }, [addToCollection, assignToNextSlot, items]);
+  }, [addToCollection, items]);
+
+  /**
+   * Fills one slot straight from the device library, without touching the
+   * collection — the path for a one-off comparison against something you are not
+   * going to keep.
+   *
+   * A pick with no asset id is a cache copy here, which is fine: session clips
+   * are not persisted either way, and anything worth keeping goes in through
+   * "Add to collection" instead.
+   */
+  const pickForSlot = useCallback(
+    async (slot: ClipSlot) => {
+      setPickingSlot(slot);
+      try {
+        const picked = await pickVideoFromLibrary();
+        if (!picked) return;
+
+        // If it happens to be a collection entry already, carry its name and
+        // mirror setting rather than showing a bare filename.
+        const existing = items.find((item) => item.ref.id === picked.clip.ref.id);
+        setClip(slot, {
+          ...picked.clip,
+          name: existing?.name ?? picked.clip.name,
+          collectionItemId: existing?.id,
+          mirrored: existing?.mirrored,
+        });
+      } catch (error) {
+        Alert.alert(
+          'Could not open the picker',
+          error instanceof Error ? error.message : String(error)
+        );
+      } finally {
+        setPickingSlot(null);
+      }
+    },
+    [items, setClip]
+  );
 
   const confirmDelete = useCallback(
     (item: CollectionItem) => {
@@ -201,6 +237,7 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
       )}
 
       <FlatList
+        ref={listRef}
         data={items}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
@@ -209,11 +246,29 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
           <Card style={styles.emptyCard}>
             <Text variant="heading">Your collection is empty</Text>
             <Text variant="caption" muted style={styles.emptyBody}>
-              Record a clip or add one from your library, and give it a name you will recognise
-              later — a model routine, a personal best, a coach&apos;s demo. Videos are referenced,
-              never copied.
+              Save the clips you compare against again and again — a model routine, a personal
+              best, a coach&apos;s demo. Videos are referenced, never copied.
             </Text>
           </Card>
+        }
+        ListFooterComponent={
+          <View style={styles.footer}>
+            <Button
+              label="Add to collection"
+              icon="＋"
+              variant="secondary"
+              block
+              loading={addingToCollection}
+              onPress={() => void addToLibraryCollection()}
+            />
+            <Button
+              label="Record a new clip"
+              icon="●"
+              variant="ghost"
+              block
+              onPress={() => navigation.navigate('Record')}
+            />
+          </View>
         }
         renderItem={({ item }) => {
           const slot = slotForItem(item);
@@ -274,20 +329,23 @@ export function CollectionScreen({ navigation }: RootScreenProps<'Collection'>) 
         }}
       />
 
+      {/* Fixed: picking the two clips for the comparison at hand, straight from
+          the device library and without adding anything to the collection. */}
       <View style={styles.bottomBar}>
         <Button
-          label="Record"
-          icon="●"
+          label={reference ? 'Replace video 1' : 'Pick video 1'}
+          icon="▣"
           variant="secondary"
-          onPress={() => navigation.navigate('Record')}
+          loading={pickingSlot === 'reference'}
+          onPress={() => void pickForSlot('reference')}
           style={styles.bottomButton}
         />
         <Button
-          label="Add from library"
+          label={comparison ? 'Replace video 2' : 'Pick video 2'}
           icon="▣"
           variant="secondary"
-          loading={picking}
-          onPress={() => void addFromLibrary()}
+          loading={pickingSlot === 'comparison'}
+          onPress={() => void pickForSlot('comparison')}
           style={styles.bottomButton}
         />
       </View>
@@ -391,6 +449,7 @@ const styles = StyleSheet.create({
   playGlyph: { fontSize: 11, color: colors.textFaint },
   itemActions: { flexDirection: 'row', gap: spacing.sm },
   itemButton: { flex: 1, paddingHorizontal: spacing.sm, minHeight: 42 },
+  footer: { gap: spacing.xs, paddingTop: spacing.sm },
   emptyCard: { gap: spacing.sm, marginTop: spacing.lg },
   emptyBody: { lineHeight: 19 },
   bottomBar: {

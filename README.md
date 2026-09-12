@@ -18,14 +18,21 @@ taps replace video 2 — you keep the clip you are comparing *against* and cycle
 attempts through the other slot. Two chips at the top show the current selection
 and clear it.
 
-A fixed bottom bar holds the two ways to bring in new material:
+Adding to the collection and choosing clips for the comparison at hand are kept
+apart, because they are different jobs:
 
-- **Record** — in-app capture, then a review screen: *retake*, *use for
-  comparison*, or *save to collection* under a name you choose.
-- **Add from library** — the **system video picker**
-  (`PHPickerViewController` on iOS, the platform picker on Android), not a grid
-  this app draws. Picks backed by a persistent asset id join the collection
-  automatically.
+- **At the end of the list** — *Add to collection* and *Record a new clip*. These
+  grow your library and leave the slots alone. A pick is stored and the list
+  scrolls back to it, so you can see it landed.
+- **In the fixed bottom bar** — *Pick video 1* and *Pick video 2*. These fill one
+  slot straight from the device library without adding anything to the
+  collection: the path for a one-off comparison against footage you are not going
+  to keep.
+
+Both use the **system video picker** (`PHPickerViewController` on iOS, the
+platform picker on Android), not a grid this app draws. Recording goes through a
+review screen first: *retake*, *use for comparison*, or *save to collection*
+under a name you choose.
 
 **2 · Sync**
 

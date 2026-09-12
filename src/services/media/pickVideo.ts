@@ -14,6 +14,10 @@
  * the picker from re-encoding the clip on the way out. A transcode would rewrite
  * the frame rate, and frame-accurate comparison depends on the frame rate being
  * the one the camera actually recorded.
+ *
+ * Choosing `Passthrough` forces a third: it is the one preset that will not pull
+ * an iCloud-only asset down on its own, so `shouldDownloadFromNetwork` has to be
+ * set or the picker fails on any clip the device has offloaded.
  */
 
 import * as ImagePicker from 'expo-image-picker';
@@ -44,6 +48,11 @@ export async function pickVideoFromLibrary(): Promise<PickVideoResult | null> {
     videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
     preferredAssetRepresentationMode:
       ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+    // Required *because* of Passthrough: that preset otherwise refuses assets
+    // that live only in iCloud, and with "Optimize iPhone Storage" on that is
+    // most older footage. Other presets download automatically; Passthrough
+    // does not, so it has to be asked for explicitly.
+    shouldDownloadFromNetwork: true,
   });
 
   if (result.canceled) return null;

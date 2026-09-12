@@ -35,6 +35,15 @@ export interface SessionState {
   playbackRate: number;
 
   setClip: (slot: ClipSlot, clip: ResolvedClip | null) => void;
+  /**
+   * Assigns a clip without the caller naming a slot: reference first, then
+   * comparison. With both taken it replaces the comparison clip, which is the
+   * common case — you keep the model you are comparing against and cycle
+   * through attempts. Returns the slot it used.
+   */
+  assignToNextSlot: (clip: ResolvedClip) => ClipSlot;
+  /** Which slot, if any, currently holds this clip reference. */
+  slotOf: (refId: string) => ClipSlot | null;
   clearSlot: (slot: ClipSlot) => void;
   swapClips: () => void;
   setOffset: (offsetSeconds: number) => void;
@@ -67,6 +76,24 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
         ? { reference: clip, lastAutoSync: null }
         : { comparison: clip, lastAutoSync: null }
     ),
+
+  assignToNextSlot: (clip) => {
+    const { reference } = get();
+    const slot: ClipSlot = reference == null ? 'reference' : 'comparison';
+    set(
+      slot === 'reference'
+        ? { reference: clip, lastAutoSync: null }
+        : { comparison: clip, lastAutoSync: null }
+    );
+    return slot;
+  },
+
+  slotOf: (refId) => {
+    const { reference, comparison } = get();
+    if (reference?.ref.id === refId) return 'reference';
+    if (comparison?.ref.id === refId) return 'comparison';
+    return null;
+  },
 
   clearSlot: (slot) =>
     set(() =>

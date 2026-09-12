@@ -37,6 +37,47 @@ describe('sessionStore', () => {
     expect(next.offsetSeconds).toBeCloseTo(-1.25);
   });
 
+  it('fills video 1 first, then video 2', () => {
+    const store = useSessionStore.getState();
+    expect(store.assignToNextSlot(clip('a'))).toBe('reference');
+    expect(useSessionStore.getState().assignToNextSlot(clip('b'))).toBe('comparison');
+    expect(useSessionStore.getState().reference?.name).toBe('a');
+    expect(useSessionStore.getState().comparison?.name).toBe('b');
+  });
+
+  it('replaces video 2 once both slots are taken, keeping video 1', () => {
+    const store = useSessionStore.getState();
+    store.assignToNextSlot(clip('a'));
+    useSessionStore.getState().assignToNextSlot(clip('b'));
+
+    // The reference is the clip you compare *against*, so it must survive
+    // cycling through attempts.
+    expect(useSessionStore.getState().assignToNextSlot(clip('c'))).toBe('comparison');
+    expect(useSessionStore.getState().reference?.name).toBe('a');
+    expect(useSessionStore.getState().comparison?.name).toBe('c');
+  });
+
+  it('refills video 1 when it has been cleared', () => {
+    const store = useSessionStore.getState();
+    store.assignToNextSlot(clip('a'));
+    useSessionStore.getState().assignToNextSlot(clip('b'));
+    useSessionStore.getState().clearSlot('reference');
+
+    expect(useSessionStore.getState().assignToNextSlot(clip('c'))).toBe('reference');
+    expect(useSessionStore.getState().reference?.name).toBe('c');
+  });
+
+  it('reports which slot holds a given clip reference', () => {
+    const store = useSessionStore.getState();
+    store.assignToNextSlot(clip('a'));
+    useSessionStore.getState().assignToNextSlot(clip('b'));
+
+    const state = useSessionStore.getState();
+    expect(state.slotOf('a')).toBe('reference');
+    expect(state.slotOf('b')).toBe('comparison');
+    expect(state.slotOf('nope')).toBeNull();
+  });
+
   it('clears the stale auto-sync explanation when a clip changes', () => {
     useSessionStore.setState({
       lastAutoSync: {

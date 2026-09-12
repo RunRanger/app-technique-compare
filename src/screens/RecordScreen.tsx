@@ -23,7 +23,9 @@ import { formatTimecode } from '@/playback/timeline';
 const MAX_DURATION_SECONDS = 120;
 
 export function RecordScreen({ navigation, route }: RootScreenProps<'Record'>) {
-  const { slot } = route.params;
+  // Omitted when recording from the collection screen: the clip then lands in
+  // the next free slot like any other selection.
+  const slot = route.params?.slot;
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
@@ -96,9 +98,9 @@ export function RecordScreen({ navigation, route }: RootScreenProps<'Record'>) {
             }}
           />
           <Button
-            label="Pick from gallery instead"
+            label="Back to collection"
             variant="secondary"
-            onPress={() => navigation.replace('Gallery', { slot })}
+            onPress={() => navigation.navigate('Collection')}
           />
         </Card>
       </Screen>

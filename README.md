@@ -10,16 +10,22 @@ Built with Expo SDK 57, React Native 0.86, TypeScript.
 
 ## What it does
 
-**1 · Pick two clips**
+**1 · Pick two clips — the collection is the first screen**
 
-| | Video 1 (reference) | Video 2 (comparison) |
-|---|---|---|
-| Saved collection | ✅ primary | ✅ |
-| Device gallery | ✅ | ✅ primary |
-| Record in-app | ✅ | ✅ |
+The app opens on your saved collection. Tapping a clip selects it immediately:
+the first tap fills **video 1**, the second fills **video 2**, and after that
+taps replace video 2 — you keep the clip you are comparing *against* and cycle
+attempts through the other slot. Two chips at the top show the current selection
+and clear it.
 
-Recording goes to a review screen first — **retake**, **use for comparison**, or
-**save to collection** under a name you choose.
+A fixed bottom bar holds the two ways to bring in new material:
+
+- **Record** — in-app capture, then a review screen: *retake*, *use for
+  comparison*, or *save to collection* under a name you choose.
+- **Add from library** — the **system video picker**
+  (`PHPickerViewController` on iOS, the platform picker on Android), not a grid
+  this app draws. Picks backed by a persistent asset id join the collection
+  automatically.
 
 **2 · Sync**
 
@@ -41,8 +47,9 @@ both, and frame stepping. Three visualization modes:
 - **Overlay** — video 2 blended over video 1, opacity 0–100%.
 - **Split** — one continuous frame, with a draggable divider.
 
-Plus 0.25× / 0.5× / 1× playback, and **Replace video 2** which keeps video 1,
-the offset, and your position.
+Plus 0.25× / 0.5× / 1× playback, and **Replace video 2** — which opens the
+system picker inline, without leaving comparison, keeping video 1, the offset
+and your position.
 
 ---
 
@@ -88,7 +95,7 @@ src/
 │   ├── syncEngine.ts     Drift-correction policy, seek profiles (tested)
 │   └── useSyncedPlayback.ts  Master transport over two players
 ├── services/
-│   ├── media/        MediaLibrary wrapper + clip resolution
+│   ├── media/        MediaLibrary wrapper, system picker, clip resolution
 │   ├── pose/         PoseEstimator contract, registry, mock + native adapter
 │   └── sync/         ── auto-sync analysis, all pure ──
 │       ├── signal.ts       Pose → 1-D motion signal        (tested)
@@ -97,7 +104,7 @@ src/
 │       └── autoSync.ts     The solver                      (tested)
 ├── state/            Zustand stores (collection persisted, session transient)
 ├── components/       VideoSurface, transport, the three compare modes
-├── screens/          Home, Collection, Gallery, Record, Preview, Sync, Compare
+├── screens/          Collection (root), Record, Preview, Sync, Compare
 └── navigation/       Typed native-stack
 ```
 
@@ -226,6 +233,33 @@ offset to within one frame at 30 fps.
 
 ---
 
+### Why the system picker
+
+`expo-image-picker` presents the platform's own UI rather than a browser this app
+builds over `MediaLibrary`. Beyond looking native, on iOS 14+
+`PHPickerViewController` runs out of process, so **choosing a clip needs no photo
+library permission at all** — nothing is prompted, and the app still only ever
+sees what was picked. The user also gets the search, albums and Favourites they
+already know.
+
+Two options are non-negotiable here:
+
+```ts
+videoExportPreset: VideoExportPreset.Passthrough
+preferredAssetRepresentationMode: UIImagePickerPreferredAssetRepresentationMode.Current
+```
+
+Both stop the picker from re-encoding on the way out. A transcode would rewrite
+the frame rate, and frame-accurate comparison depends on the frame rate being the
+one the camera actually recorded.
+
+The trade-off is persistence. The picker returns `assetId` — the MediaLibrary id
+— on the paths where the platform exposes it, and those picks are stored in the
+collection as references, unchanged from the no-copy rule above. Where only a
+sandboxed copy is handed over, the clip is used for the current session but
+deliberately *not* saved to the collection, because the copy would not survive a
+restart.
+
 ## Notes on platform specifics
 
 - **Android overlay/split modes** force `surfaceType="textureView"`. The default
@@ -250,5 +284,9 @@ offset to within one frame at 30 fps.
 
 - No bundled pose model (see above) — auto-sync runs on simulated landmarks
   until one is linked in.
+- No thumbnails in the collection list; entries are text with a play glyph.
+  Real thumbnails mean a player per row and a cache, which is a feature of its
+  own.
+- UI strings are English throughout.
 - Drawing tools (angles, lines) and export/share of a comparison.
 - Clip trimming; the offset defines alignment, not in/out points.

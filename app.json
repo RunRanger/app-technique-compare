@@ -47,8 +47,17 @@
         {
           "photosPermission": "Technique Compare reads videos from your library so you can compare them without copying files.",
           "savePhotosPermission": "Technique Compare saves the videos you record to your library.",
-          "granularPermissions": ["video"],
+          "granularPermissions": [
+            "video"
+          ],
           "preventAutomaticLimitedAccessAlert": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Technique Compare only reads the video you pick, so you can compare it without copying files.",
+          "cameraPermission": "Technique Compare uses the camera to record technique videos for side-by-side motion analysis."
         }
       ],
       [
